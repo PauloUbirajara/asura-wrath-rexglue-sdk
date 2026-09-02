@@ -207,13 +207,17 @@ u32 xeXamContentCreate(u32 user_index, mapped_string root_name, mapped_void cont
     }
 
     uint32_t content_license = 0;
-    if (disposition == kDispositionState::Create) {
-      result = content_manager->CreateContent(root_name, xuid, content_data);
-      if (XSUCCEEDED(result)) {
-        content_manager->WriteContentHeaderFile(xuid, content_data);
+    try {
+      if (disposition == kDispositionState::Create) {
+        result = content_manager->CreateContent(root_name, xuid, content_data);
+        if (XSUCCEEDED(result)) {
+          content_manager->WriteContentHeaderFile(xuid, content_data);
+        }
+      } else if (disposition == kDispositionState::Open) {
+        result = content_manager->OpenContent(root_name, xuid, content_data, content_license);
       }
-    } else if (disposition == kDispositionState::Open) {
-      result = content_manager->OpenContent(root_name, xuid, content_data, content_license);
+    } catch (...) {
+      result = X_ERROR_FILE_NOT_FOUND;
     }
 
     if (license_mask_ptr && XSUCCEEDED(result)) {

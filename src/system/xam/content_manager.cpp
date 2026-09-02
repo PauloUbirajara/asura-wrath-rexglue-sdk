@@ -272,7 +272,9 @@ X_RESULT ContentManager::CreateContent(const std::string_view root_name, uint64_
     return X_ERROR_ACCESS_DENIED;
   }
   auto package = ResolvePackage(root_name, xuid, data);
-  assert_not_null(package);
+  if (!package) {
+    return X_ERROR_FILE_NOT_FOUND;
+  }
 
   {
     auto global_lock = global_critical_region_.Acquire();
@@ -299,7 +301,9 @@ X_RESULT ContentManager::OpenContent(const std::string_view root_name, uint64_t 
     return X_ERROR_FILE_NOT_FOUND;
   }
   auto package = ResolvePackage(root_name, xuid, data);
-  assert_not_null(package);
+  if (!package) {
+    return X_ERROR_FILE_NOT_FOUND;
+  }
   package->LoadPackageLicenseMask(ResolvePackageHeaderPath(
       data.file_name(), xuid, kernel_state_->title_id(), data.content_type));
   content_license = package->GetPackageLicense();
