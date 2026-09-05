@@ -51,6 +51,10 @@ REXCVAR_DEFINE_STRING(gpu_plugin, "", "GPU",
                       "GPU emulation")
     .lifecycle(rex::cvar::Lifecycle::kInitOnly);
 
+REXCVAR_DEFINE_STRING(gpu_backend, "any", "GPU",
+                      "GPU render backend to use ('d3d12', 'vulkan', or 'any')")
+    .lifecycle(rex::cvar::Lifecycle::kInitOnly);
+
 namespace rex {
 
 // --- ReXApp ---
@@ -314,7 +318,8 @@ bool ReXApp::SetupPresentation() {
   OnPreSetup(config_);
 
   if (!config_.graphics && !config_.gpu_plugin.empty()) {
-    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin);
+    std::string backend = REXCVAR_GET(gpu_backend);
+    config_.graphics = rex::system::LoadGpuPlugin(config_.gpu_plugin, backend);
     if (!config_.graphics) {
       // Fatal by design: no silent headless fallback.
       auto msg =

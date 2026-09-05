@@ -102,6 +102,10 @@ std::vector<std::string> WideArgsToUtf8(int argc, wchar_t** wargv) {
 
 }  // namespace
 
+int main(int argc, char* argv[]) {
+  return RunWindowedApp(argc, argv);
+}
+
 #if REX_PLATFORM_WIN32
 
 int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR command_line,
@@ -122,12 +126,6 @@ int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR comman
     argv_ptrs.push_back(s.data());
   }
   return RunWindowedApp(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
-}
-
-#else
-
-int main(int argc, char* argv[]) {
-  return RunWindowedApp(argc, argv);
 }
 
 #endif

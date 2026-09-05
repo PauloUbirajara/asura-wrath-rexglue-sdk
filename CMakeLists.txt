@@ -36,7 +36,7 @@ endif()
 # Vulkan: Cross-platform, ON by default on Linux, OFF by default on Windows.
 if(WIN32)
     option(REXGLUE_USE_D3D12  "Enable D3D12 graphics backend" ON)
-    option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" OFF)
+    option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
 else()
     set(REXGLUE_USE_D3D12 OFF)
     option(REXGLUE_USE_VULKAN "Enable Vulkan graphics backend" ON)
@@ -247,6 +247,11 @@ add_subdirectory(thirdparty)
 add_compile_options(
     -Wall
     -Wextra
+    -Wno-c++98-compat
+    -Wno-c++98-compat-pedantic
+    -Wno-reserved-identifier
+    -Wno-unsafe-buffer-usage
+    -Wno-global-constructors
 )
 
 include_directories(${REXGLUE_ROOT}/include)
