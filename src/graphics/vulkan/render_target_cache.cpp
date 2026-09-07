@@ -398,7 +398,8 @@ bool VulkanRenderTargetCache::Initialize(uint32_t shared_memory_binding_count) {
       color_32bit_transfer_uint_formats_supported_ && integer_transfer_sample_1x_supported &&
       integer_transfer_sample_4x_supported &&
       (!msaa_2x_attachments_supported_ || integer_transfer_sample_2x_supported);
-  if (path_ == Path::kHostRenderTargets && !bit_exact_host_color_transfer_supported) {
+  if (path_ == Path::kHostRenderTargets && !bit_exact_host_color_transfer_supported &&
+      REXCVAR_GET(render_target_path_vulkan) != "fbo") {
     if (fsi_path_supported) {
       REXGPU_WARN(
           "VulkanRenderTargetCache: Host render target ownership transfers "

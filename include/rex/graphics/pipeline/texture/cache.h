@@ -230,6 +230,12 @@ class TextureCache {
 
     void WatchCallback(const std::unique_lock<std::recursive_mutex>& global_lock, bool is_mip);
 
+    // True once at least one successful GPU upload has been committed via
+    // MakeUpToDateAndWatch. Used to guard image view binding and layout
+    // transitions so a texture that hasn't been written yet (still in
+    // VK_IMAGE_LAYOUT_UNDEFINED) is never exposed to the shader.
+    bool ever_loaded() const { return ever_loaded_; }
+
     // For LRU caching - updates the last usage frame and moves the texture to
     // the end of the usage queue. Must be called any time the texture is
     // referenced by any GPU work in the implementation to make sure it's not
@@ -269,6 +275,10 @@ class TextureCache {
     bool base_outdated_ = false;
     // Whether the recent mip data needs reloading from the memory.
     bool mips_outdated_ = false;
+    // Set to true after the first successful commit via MakeUpToDateAndWatch.
+    // A texture that hasn't been written yet must not be bound to descriptors
+    // or transitioned out of VK_IMAGE_LAYOUT_UNDEFINED.
+    bool ever_loaded_ = false;
     std::atomic<uint32_t> outdated_mask_{0};
     // Watch handles for the memory ranges.
     SharedMemory::WatchHandle base_watch_handle_ = nullptr;

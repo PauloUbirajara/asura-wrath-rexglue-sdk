@@ -703,6 +703,9 @@ void TextureCache::Texture::MakeUpToDateAndWatch(
         key().mip_page << 12, GetGuestMipsSize(), TextureCache::WatchCallback, this, nullptr, 1);
     outdated_mask_.fetch_and(~kOutdatedBitMips, std::memory_order_release);
   }
+  // Mark as ever-loaded so downstream code (barriers, descriptor binding)
+  // knows this texture has valid GPU data and can be safely used.
+  ever_loaded_ = true;
 }
 
 void TextureCache::Texture::MarkAsUsed() {

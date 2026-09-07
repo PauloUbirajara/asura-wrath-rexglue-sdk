@@ -74,39 +74,36 @@ size_t SingleLayoutDescriptorSetPool::Allocate() {
       if (dfn.vkCreateDescriptorPool(device, &pool_create_info, nullptr, &current_pool_) !=
           VK_SUCCESS) {
         REXLOG_ERROR(
-            "SingleLayoutDescriptorSetPool: Failed to create a descriptor "
-            "pool");
+            "SingleLayoutDescriptorSetPool: Failed to create a descriptor pool");
         return SIZE_MAX;
       }
-      current_pool_sets_remaining_ = pool_set_count_;
-    }
-
-    VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
-    descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptor_set_allocate_info.pNext = nullptr;
-    descriptor_set_allocate_info.descriptorPool = current_pool_;
-    descriptor_set_allocate_info.descriptorSetCount = 1;
-    descriptor_set_allocate_info.pSetLayouts = &set_layout_;
-    VkDescriptorSet descriptor_set;
-    if (dfn.vkAllocateDescriptorSets(device, &descriptor_set_allocate_info, &descriptor_set) !=
-        VK_SUCCESS) {
-      REXLOG_ERROR("SingleLayoutDescriptorSetPool: Failed to allocate a descriptor set");
-      if (current_pool_sets_remaining_ >= pool_set_count_) {
-        // Failed to allocate in a new pool - something completely wrong, don't
-        // store empty pools as full.
+      std::vector<VkDescriptorSetLayout> layouts(pool_set_count_, set_layout_);
+      std::vector<VkDescriptorSet> new_sets(pool_set_count_);
+      VkDescriptorSetAllocateInfo descriptor_set_allocate_info;
+      descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+      descriptor_set_allocate_info.pNext = nullptr;
+      descriptor_set_allocate_info.descriptorPool = current_pool_;
+      descriptor_set_allocate_info.descriptorSetCount = pool_set_count_;
+      descriptor_set_allocate_info.pSetLayouts = layouts.data();
+      if (dfn.vkAllocateDescriptorSets(device, &descriptor_set_allocate_info, new_sets.data()) !=
+          VK_SUCCESS) {
+        REXLOG_ERROR("SingleLayoutDescriptorSetPool: Failed to bulk allocate descriptor sets");
         dfn.vkDestroyDescriptorPool(device, current_pool_, nullptr);
         current_pool_ = VK_NULL_HANDLE;
         return SIZE_MAX;
       }
+      size_t base_index = descriptor_sets_.size();
+      descriptor_sets_.insert(descriptor_sets_.end(), new_sets.begin(), new_sets.end());
+      for (size_t k = pool_set_count_ - 1; k >= 1; --k) {
+        descriptor_sets_free_.push_back(base_index + k);
+      }
       full_pools_.push_back(current_pool_);
       current_pool_ = VK_NULL_HANDLE;
+      current_pool_sets_remaining_ = 0;
+      return base_index;
     }
-    --current_pool_sets_remaining_;
-    descriptor_sets_.push_back(descriptor_set);
-    return descriptor_sets_.size() - 1;
   }
 
-  // Both attempts have failed.
   return SIZE_MAX;
 }
 

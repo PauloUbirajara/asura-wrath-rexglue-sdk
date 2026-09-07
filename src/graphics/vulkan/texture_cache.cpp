@@ -578,7 +578,11 @@ void VulkanTextureCache::RequestTextures(uint32_t used_texture_mask) {
     }
   }
 
-  // Transition the textures into the needed usage.
+  // Transition textures that have been loaded at least once into shader-sampled
+  // usage. Textures that have never completed a GPU upload (ever_loaded()==false)
+  // are still in VK_IMAGE_LAYOUT_UNDEFINED - do NOT transition them here or the
+  // driver will discard their contents and render them as white/black. They will
+  // be transitioned on the frame their first successful load commits.
   VkPipelineStageFlags dst_stage_mask;
   VkAccessFlags dst_access_mask;
   VkImageLayout new_layout;
@@ -593,7 +597,7 @@ void VulkanTextureCache::RequestTextures(uint32_t used_texture_mask) {
       continue;
     }
     VulkanTexture* binding_texture = static_cast<VulkanTexture*>(binding->texture);
-    if (binding_texture != nullptr) {
+    if (binding_texture != nullptr && binding_texture->ever_loaded()) {
       // Will be referenced by the command buffer, so mark as used.
       binding_texture->MarkAsUsed();
       VulkanTexture::Usage old_usage =
@@ -610,7 +614,7 @@ void VulkanTextureCache::RequestTextures(uint32_t used_texture_mask) {
       }
     }
     VulkanTexture* binding_texture_signed = static_cast<VulkanTexture*>(binding->texture_signed);
-    if (binding_texture_signed != nullptr) {
+    if (binding_texture_signed != nullptr && binding_texture_signed->ever_loaded()) {
       binding_texture_signed->MarkAsUsed();
       VulkanTexture::Usage old_usage =
           binding_texture_signed->SetUsage(VulkanTexture::Usage::kGuestShaderSampled);
@@ -1792,9 +1796,9 @@ void VulkanTextureCache::UpdateTextureBindingsImpl(uint32_t fetch_constant_mask)
   while (rex::bit_scan_forward(bindings_remaining, &binding_index)) {
     bindings_remaining &= ~(UINT32_C(1) << binding_index);
     VulkanTextureBinding& vulkan_binding = vulkan_texture_bindings_[binding_index];
-    vulkan_binding.Reset();
     const TextureBinding* binding = GetValidTextureBinding(binding_index);
     if (!binding) {
+      vulkan_binding.Reset();
       continue;
     }
     const HostFormatPair& host_format_pair = GetHostFormatPair(binding->key);
@@ -1807,20 +1811,27 @@ void VulkanTextureCache::UpdateTextureBindingsImpl(uint32_t fetch_constant_mask)
     if (uses_signed && host_format_pair.format_signed.format == VK_FORMAT_UNDEFINED) {
       unsupported_format_features_used_[uint32_t(format)] |= kUnsupportedSnormBit;
     }
+    // Only update the stored image view if the texture has been successfully
+    // uploaded at least once. If the load is still pending (DMA in-flight),
+    // keep whatever view is already in the slot - typically the prior mip-only
+    // texture - so the shader continues to see low-res rather than garbage from
+    // an uninitialised VkImage.
     if (IsSignedVersionSeparateForFormat(binding->key)) {
       if (binding->texture && uses_unsigned &&
-          host_format_pair.format_unsigned.format != VK_FORMAT_UNDEFINED) {
+          host_format_pair.format_unsigned.format != VK_FORMAT_UNDEFINED &&
+          binding->texture->ever_loaded()) {
         vulkan_binding.image_view_unsigned =
             static_cast<VulkanTexture*>(binding->texture)->GetView(false, binding->host_swizzle);
       }
       if (binding->texture_signed && uses_signed &&
-          host_format_pair.format_signed.format != VK_FORMAT_UNDEFINED) {
+          host_format_pair.format_signed.format != VK_FORMAT_UNDEFINED &&
+          binding->texture_signed->ever_loaded()) {
         vulkan_binding.image_view_signed = static_cast<VulkanTexture*>(binding->texture_signed)
                                                ->GetView(true, binding->host_swizzle);
       }
     } else {
       VulkanTexture* texture = static_cast<VulkanTexture*>(binding->texture);
-      if (texture) {
+      if (texture && texture->ever_loaded()) {
         if (uses_unsigned && host_format_pair.format_unsigned.format != VK_FORMAT_UNDEFINED) {
           vulkan_binding.image_view_unsigned = texture->GetView(false, binding->host_swizzle);
         }
