@@ -34,3 +34,7 @@ target_include_directories(rexfilesystem PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_include_directories(rexfilesystem PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/devices)
+
+add_executable(xenia-vfs vfs_dump.cpp)
+target_link_libraries(xenia-vfs PRIVATE rexfilesystem rexcore)
+

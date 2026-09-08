@@ -145,9 +145,14 @@ std::vector<XCONTENT_AGGREGATE_DATA> ContentManager::ListContent(uint32_t device
     title_id = kernel_state_->title_id();
   }
 
+  if (content_type == XContentType::kMarketplaceContent) {
+    xuid = 0;
+  }
+
   // Search path:
   // content_root/xuid/title_id/type_name/*
   auto package_root = ResolvePackageRoot(xuid, content_type, title_id);
+
   auto file_infos = rex::filesystem::ListFiles(package_root);
   for (const auto& file_info : file_infos) {
     if (file_info.type != rex::filesystem::FileInfo::Type::kDirectory) {

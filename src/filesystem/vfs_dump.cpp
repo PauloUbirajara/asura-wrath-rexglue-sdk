@@ -37,17 +37,17 @@ int vfs_dump_main(const std::vector<std::string>& args) {
 
   std::filesystem::path source = rex::to_path(REXCVAR_GET(dump_source));
   std::filesystem::path base_path = rex::to_path(REXCVAR_GET(dump_path));
-  std::unique_ptr<vfs::Device> device;
+  std::unique_ptr<Device> device;
 
   // TODO: Flags specifying the type of device.
-  device = std::make_unique<vfs::StfsContainerDevice>("", source);
+  device = std::make_unique<StfsContainerDevice>("", source);
   if (!device->Initialize()) {
     REXFS_ERROR("Failed to initialize device");
     return 1;
   }
 
   // Run through all the files, breadth-first style.
-  std::queue<vfs::Entry*> queue;
+  std::queue<Entry*> queue;
   auto root = device->ResolvePath("/");
   queue.push(root);
 
@@ -63,13 +63,16 @@ int vfs_dump_main(const std::vector<std::string>& args) {
     }
 
     REXFS_INFO("{}", entry->path());
-    auto dest_name = base_path / rex::to_path(entry->path());
+    std::string rel_path(entry->path());
+    std::replace(rel_path.begin(), rel_path.end(), '\\', '/');
+    auto dest_name = base_path / rex::to_path(rel_path);
     if (entry->attributes() & kFileAttributeDirectory) {
       std::filesystem::create_directories(dest_name);
       continue;
     }
 
-    vfs::File* in_file = nullptr;
+
+    File* in_file = nullptr;
     if (entry->Open(FileAccess::kFileReadData, &in_file) != X_STATUS_SUCCESS) {
       continue;
     }
@@ -115,5 +118,21 @@ int vfs_dump_main(const std::vector<std::string>& args) {
 
 }  // namespace rex::filesystem
 
-// TODO: CONSOLE APP - XE_DEFINE_CONSOLE_APP("xenia-vfs-dump", rex::filesystem::vfs_dump_main,
-//                       "[source] [dump_path]", "source", "dump_path");
+int main(int argc, char** argv) {
+  if (argc < 3) {
+    printf("Usage: xenia-vfs <stfs_container_file> <output_directory>\n");
+    return 1;
+  }
+
+  REXCVAR_SET(dump_source, argv[1]);
+  REXCVAR_SET(dump_path, argv[2]);
+
+  std::vector<std::string> args;
+  for (int i = 0; i < argc; ++i) {
+    args.emplace_back(argv[i]);
+  }
+
+  return rex::filesystem::vfs_dump_main(args);
+}
+
+
