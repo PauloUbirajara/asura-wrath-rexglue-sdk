@@ -311,10 +311,17 @@ bool VulkanSharedMemory::UploadRanges(
         upload_regions_.clear();
       }
       upload_buffer_previous = upload_buffer;
-      VkBufferCopy& upload_region = upload_regions_.emplace_back();
-      upload_region.srcOffset = upload_buffer_offset;
-      upload_region.dstOffset = VkDeviceSize(upload_range_start << page_size_log2());
-      upload_region.size = upload_buffer_size;
+      if (!upload_regions_.empty() &&
+          upload_regions_.back().srcOffset + upload_regions_.back().size == upload_buffer_offset &&
+          upload_regions_.back().dstOffset + upload_regions_.back().size ==
+              VkDeviceSize(upload_range_start << page_size_log2())) {
+        upload_regions_.back().size += upload_buffer_size;
+      } else {
+        VkBufferCopy& upload_region = upload_regions_.emplace_back();
+        upload_region.srcOffset = upload_buffer_offset;
+        upload_region.dstOffset = VkDeviceSize(upload_range_start << page_size_log2());
+        upload_region.size = upload_buffer_size;
+      }
       uint32_t upload_buffer_pages = uint32_t(upload_buffer_size >> page_size_log2());
       upload_range_start += upload_buffer_pages;
       upload_range_length -= upload_buffer_pages;
@@ -337,7 +344,7 @@ void VulkanSharedMemory::GetUsageMasks(Usage usage, VkPipelineStageFlags& stage_
   switch (usage) {
     case Usage::kComputeWrite:
       stage_mask = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
-      access_mask = VK_ACCESS_SHADER_READ_BIT;
+      access_mask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
       return;
     case Usage::kTransferDestination:
       stage_mask = VK_PIPELINE_STAGE_TRANSFER_BIT;

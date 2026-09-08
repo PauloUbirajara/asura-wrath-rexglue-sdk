@@ -657,6 +657,10 @@ VkImageView VulkanTextureCache::GetActiveBindingOrNullImageView(uint32_t fetch_c
       const VulkanTextureBinding& vulkan_binding = vulkan_texture_bindings_[fetch_constant_index];
       image_view =
           is_signed ? vulkan_binding.image_view_signed : vulkan_binding.image_view_unsigned;
+      if (image_view == VK_NULL_HANDLE) {
+        image_view =
+            is_signed ? vulkan_binding.image_view_unsigned : vulkan_binding.image_view_signed;
+      }
     }
   }
   if (image_view != VK_NULL_HANDLE) {
@@ -1816,6 +1820,7 @@ void VulkanTextureCache::UpdateTextureBindingsImpl(uint32_t fetch_constant_mask)
     // keep whatever view is already in the slot - typically the prior mip-only
     // texture - so the shader continues to see low-res rather than garbage from
     // an uninitialised VkImage.
+    vulkan_binding.Reset();
     if (IsSignedVersionSeparateForFormat(binding->key)) {
       if (binding->texture && uses_unsigned &&
           host_format_pair.format_unsigned.format != VK_FORMAT_UNDEFINED &&
@@ -1839,6 +1844,12 @@ void VulkanTextureCache::UpdateTextureBindingsImpl(uint32_t fetch_constant_mask)
           vulkan_binding.image_view_signed = texture->GetView(true, binding->host_swizzle);
         }
       }
+    }
+    if (vulkan_binding.image_view_signed == VK_NULL_HANDLE) {
+      vulkan_binding.image_view_signed = vulkan_binding.image_view_unsigned;
+    }
+    if (vulkan_binding.image_view_unsigned == VK_NULL_HANDLE) {
+      vulkan_binding.image_view_unsigned = vulkan_binding.image_view_signed;
     }
   }
 }
@@ -3125,9 +3136,7 @@ bool VulkanTextureCache::Initialize() {
     null_image_view_create_info.format = null_image_create_info.format;
     // Micro-optimization if this has any effect on the host GPU at all, use only
     // constant components instead of the real texels.
-    VkComponentSwizzle null_image_view_swizzle = device_properties.imageViewFormatSwizzle
-                                                     ? VK_COMPONENT_SWIZZLE_ZERO
-                                                     : VK_COMPONENT_SWIZZLE_IDENTITY;
+    VkComponentSwizzle null_image_view_swizzle = VK_COMPONENT_SWIZZLE_ZERO;
     null_image_view_create_info.components.r = null_image_view_swizzle;
     null_image_view_create_info.components.g = null_image_view_swizzle;
     null_image_view_create_info.components.b = null_image_view_swizzle;

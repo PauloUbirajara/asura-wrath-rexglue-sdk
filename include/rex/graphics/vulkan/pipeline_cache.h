@@ -468,6 +468,8 @@ class VulkanPipelineCache {
   bool creation_completion_set_event_ = false;
   size_t creation_threads_shutdown_from_ = SIZE_MAX;
   std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads_;
+
+  VkPipelineCache vulkan_pipeline_cache_ = VK_NULL_HANDLE;
 };
 
 }  // namespace rex::graphics::vulkan

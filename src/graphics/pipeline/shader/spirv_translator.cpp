@@ -3054,32 +3054,38 @@ void SpirvShaderTranslator::StartFragmentShaderInMain() {
       // samples don't additionally need to be discarded.
       spv::Id quad_needs_execution =
           builder_->createBinOp(spv::OpINotEqual, type_bool_, main_fsi_sample_mask_, const_uint_0_);
-      // TODO(Triang3l): Use GroupNonUniformQuad operations where supported.
-      // If none of the pixels in the quad passed the depth / stencil test, the
-      // value of (any samples covered ? 1.0f : 0.0f) for the current pixel will
-      // be 0.0f, and since it will be 0.0f in other pixels too, the derivatives
-      // will be zero as well.
-      builder_->addCapability(spv::CapabilityDerivativeControl);
-      // Query the horizontally adjacent pixel.
-      quad_needs_execution = builder_->createBinOp(
-          spv::OpLogicalOr, type_bool_, quad_needs_execution,
-          builder_->createBinOp(
-              spv::OpFOrdNotEqual, type_bool_,
-              builder_->createUnaryOp(
-                  spv::OpDPdxFine, type_float_,
-                  builder_->createTriOp(spv::OpSelect, type_float_, quad_needs_execution,
-                                        const_float_1_, const_float_0_)),
-              const_float_0_));
-      // Query the vertically adjacent pair of pixels.
-      quad_needs_execution = builder_->createBinOp(
-          spv::OpLogicalOr, type_bool_, quad_needs_execution,
-          builder_->createBinOp(
-              spv::OpFOrdNotEqual, type_bool_,
-              builder_->createUnaryOp(
-                  spv::OpDPdyCoarse, type_float_,
-                  builder_->createTriOp(spv::OpSelect, type_float_, quad_needs_execution,
-                                        const_float_1_, const_float_0_)),
-              const_float_0_));
+      if (features_.spirv_version >= spv::Spv_1_3) {
+        builder_->addCapability(spv::CapabilityGroupNonUniformQuad);
+        quad_needs_execution = builder_->createBinOp(
+            spv::OpGroupNonUniformAny, type_bool_,
+            builder_->makeUintConstant(spv::ScopeSubgroup), quad_needs_execution);
+      } else {
+        // If none of the pixels in the quad passed the depth / stencil test, the
+        // value of (any samples covered ? 1.0f : 0.0f) for the current pixel will
+        // be 0.0f, and since it will be 0.0f in other pixels too, the derivatives
+        // will be zero as well.
+        builder_->addCapability(spv::CapabilityDerivativeControl);
+        // Query the horizontally adjacent pixel.
+        quad_needs_execution = builder_->createBinOp(
+            spv::OpLogicalOr, type_bool_, quad_needs_execution,
+            builder_->createBinOp(
+                spv::OpFOrdNotEqual, type_bool_,
+                builder_->createUnaryOp(
+                    spv::OpDPdxFine, type_float_,
+                    builder_->createTriOp(spv::OpSelect, type_float_, quad_needs_execution,
+                                          const_float_1_, const_float_0_)),
+                const_float_0_));
+        // Query the vertically adjacent pair of pixels.
+        quad_needs_execution = builder_->createBinOp(
+            spv::OpLogicalOr, type_bool_, quad_needs_execution,
+            builder_->createBinOp(
+                spv::OpFOrdNotEqual, type_bool_,
+                builder_->createUnaryOp(
+                    spv::OpDPdyCoarse, type_float_,
+                    builder_->createTriOp(spv::OpSelect, type_float_, quad_needs_execution,
+                                          const_float_1_, const_float_0_)),
+                const_float_0_));
+      }
       spv::Block& main_fsi_early_depth_stencil_execute_quad = builder_->makeNewBlock();
       main_fsi_early_depth_stencil_execute_quad_merge_ = &builder_->makeNewBlock();
       builder_->createSelectionMerge(main_fsi_early_depth_stencil_execute_quad_merge_,

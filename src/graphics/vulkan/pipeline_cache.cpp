@@ -287,6 +287,12 @@ VulkanPipelineCache::~VulkanPipelineCache() {
 
 bool VulkanPipelineCache::Initialize() {
   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
+  const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+
+  VkPipelineCacheCreateInfo pipeline_cache_create_info = {};
+  pipeline_cache_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+  dfn.vkCreatePipelineCache(vulkan_device->device(), &pipeline_cache_create_info, nullptr,
+                            &vulkan_pipeline_cache_);
 
   bool edram_fragment_shader_interlock =
       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
@@ -865,6 +871,11 @@ void VulkanPipelineCache::Shutdown() {
     }
   }
   geometry_shaders_.clear();
+
+  if (vulkan_pipeline_cache_ != VK_NULL_HANDLE) {
+    dfn.vkDestroyPipelineCache(device, vulkan_pipeline_cache_, nullptr);
+    vulkan_pipeline_cache_ = VK_NULL_HANDLE;
+  }
 
   // Destroy all translated shaders.
   for (auto it : shaders_) {
@@ -3480,7 +3491,7 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
   const VkDevice device = vulkan_device->device();
   VkPipeline pipeline;
-  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1,
+  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
                                                          &pipeline_create_info, nullptr, &pipeline);
   if (create_result != VK_SUCCESS) {
     uint64_t ps_hash = creation_arguments.pixel_shader
