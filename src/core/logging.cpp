@@ -72,11 +72,11 @@ LogConfig g_config;
 
 std::filesystem::path NextSequentialLogPath(const std::filesystem::path& logs_dir,
                                             std::string_view app_name) {
-  std::filesystem::create_directories(logs_dir);
+  std::error_code ec;
+  std::filesystem::create_directories(logs_dir, ec);
 
   int max_seq = 0;
   std::string prefix = std::string(app_name) + "_";
-  std::error_code ec;
   for (const auto& entry : std::filesystem::directory_iterator(logs_dir, ec)) {
     if (!entry.is_regular_file())
       continue;
@@ -226,12 +226,16 @@ void InitLogging(const LogConfig& config) {
     resolved_path = NextSequentialLogPath(log_dir, config.app_name).string();
   }
   if (!resolved_path.empty()) {
-    auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
-        resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
-        static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
-    sink->set_level(spdlog::level::trace);
-    sink->set_pattern(config.file_pattern);
-    g_file_sink = sink;
+    try {
+      auto sink = std::make_shared<spdlog::sinks::rotating_file_sink_mt>(
+          resolved_path, static_cast<size_t>(REXCVAR_GET(log_max_file_size_mb)) * 1024 * 1024,
+          static_cast<size_t>(REXCVAR_GET(log_max_files)), false);
+      sink->set_level(spdlog::level::trace);
+      sink->set_pattern(config.file_pattern);
+      g_file_sink = sink;
+    } catch (const spdlog::spdlog_ex& e) {
+      // Ignore file sink creation failure (e.g. read-only filesystem)
+    }
   }
 
   g_extra_sinks = config.extra_sinks;

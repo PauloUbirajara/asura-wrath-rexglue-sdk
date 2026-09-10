@@ -172,7 +172,7 @@ bool ReXApp::SetupEnvironment() {
                                         log_level_str, category_levels);
   if (log_file_cvar.empty()) {
     log_config.app_name = std::string(GetName());
-    log_config.log_dir = (exe_dir / "logs").string();
+    log_config.log_dir = (user_dir / "logs").string();
   }
 
   rex::InitLogging(log_config);
@@ -211,7 +211,7 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
     rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
     return false;
   }
-  if (!std::filesystem::is_directory(paths.game_data_root)) {
+  if (!std::filesystem::exists(paths.game_data_root)) {
     auto msg = fmt::format("--game_data_root does not exist: {}", paths.game_data_root.string());
     REXLOG_ERROR("{}", msg);
     rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
@@ -279,7 +279,7 @@ bool ReXApp::ConstructRuntime(const PathConfig& paths) {
     std::string host_tail{tail};
     std::replace(host_tail.begin(), host_tail.end(), '\\', '/');
     auto xex_host = paths.game_data_root / host_tail;
-    if (!std::filesystem::is_regular_file(xex_host)) {
+    if (!std::filesystem::is_regular_file(paths.game_data_root) && !std::filesystem::is_regular_file(xex_host)) {
       auto msg = fmt::format("Entrypoint XEX not found: {}", xex_host.string());
       REXLOG_ERROR("{}", msg);
       rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);

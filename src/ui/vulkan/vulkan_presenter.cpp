@@ -1139,6 +1139,11 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
   // device, and the minimum swap chain size on the whole instance - fail to
   // create until the surface becomes smaller).
   VkExtent2D max_framebuffer_extent = util::GetMax2DFramebufferExtent(vulkan_device->properties());
+#if REX_PLATFORM_ANDROID
+  if (width < height) {
+    std::swap(width, height);
+  }
+#endif
   VkExtent2D image_extent;
   image_extent.width = std::min(std::max(std::min(width, max_framebuffer_extent.width),
                                          surface_capabilities.minImageExtent.width),
@@ -1188,7 +1193,11 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
 
   // TODO(Triang3l): Support transforms.
   if (!(surface_capabilities.supportedTransforms &
-        (VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR | VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR))) {
+        (VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR | VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR
+#if REX_PLATFORM_ANDROID
+         | surface_capabilities.currentTransform
+#endif
+         ))) {
     REXLOG_ERROR(
         "VulkanPresenter: The surface doesn't support identity or "
         "window-system-controlled transform");
@@ -1352,10 +1361,13 @@ VkSwapchainKHR VulkanPresenter::PaintContext::CreateSwapchainForVulkanSurface(
     swapchain_create_info.queueFamilyIndexCount = 0;
     swapchain_create_info.pQueueFamilyIndices = nullptr;
   }
-  swapchain_create_info.preTransform =
-      (surface_capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
-          ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-          : VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR;
+  if (surface_capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) {
+    swapchain_create_info.preTransform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
+  } else if (surface_capabilities.supportedTransforms & VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR) {
+    swapchain_create_info.preTransform = VK_SURFACE_TRANSFORM_INHERIT_BIT_KHR;
+  } else {
+    swapchain_create_info.preTransform = surface_capabilities.currentTransform;
+  }
   // Prefer opaque to avoid blending in the window system, or let that be
   // specified via the window system if it can't be forced. As a last resort,
   // just pick any - guest output will write alpha of 1 anyway.

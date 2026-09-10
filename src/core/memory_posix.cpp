@@ -15,9 +15,11 @@
 #include <cstring>
 #include <fstream>
 #include <functional>
+#include <mutex>
 #include <string>
 
 #include <fcntl.h>
+#include <sys/syscall.h>
 
 #if REX_PLATFORM_MAC
 #include <mach/mach.h>
@@ -91,15 +93,13 @@ static void* libandroid_;
 static int (*android_ASharedMemory_create_)(const char* name, size_t size);
 
 void AndroidInitialize() {
-  if (rex::GetAndroidApiLevel() >= 26) {
-    libandroid_ = dlopen("libandroid.so", RTLD_NOW);
-    assert_not_null(libandroid_);
-    if (libandroid_) {
-      android_ASharedMemory_create_ = reinterpret_cast<decltype(android_ASharedMemory_create_)>(
-          dlsym(libandroid_, "ASharedMemory_create"));
-      assert_not_null(android_ASharedMemory_create_);
-    }
+#if defined(__ANDROID_API__) && __ANDROID_API__ >= 26
+  libandroid_ = dlopen("libandroid.so", RTLD_NOW);
+  if (libandroid_) {
+    android_ASharedMemory_create_ = reinterpret_cast<decltype(android_ASharedMemory_create_)>(
+        dlsym(libandroid_, "ASharedMemory_create"));
   }
+#endif
 }
 
 void AndroidShutdown() {
@@ -432,16 +432,37 @@ bool QueryProtect(void* base_address, size_t& length, PageAccess& access_out) {
 FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, size_t length,
                                           PageAccess access, bool commit) {
 #if REX_PLATFORM_ANDROID
-  // TODO(Triang3l): Check if memfd can be used instead on API 30+.
-  if (android_ASharedMemory_create_) {
-    int sharedmem_fd = android_ASharedMemory_create_(path.c_str(), length);
-    return sharedmem_fd >= 0 ? static_cast<FileMappingHandle>(sharedmem_fd)
-                             : kFileMappingHandleInvalid;
+  static std::once_flag init_flag;
+  std::call_once(init_flag, []() {
+    AndroidInitialize();
+  });
+
+  if (!android_ASharedMemory_create_) {
+    void* lib = dlopen("libandroid.so", RTLD_NOW);
+    if (lib) {
+      android_ASharedMemory_create_ = reinterpret_cast<decltype(android_ASharedMemory_create_)>(
+          dlsym(lib, "ASharedMemory_create"));
+    }
   }
 
-  // Use /dev/ashmem on API versions below 26, which added ASharedMemory.
-  // /dev/ashmem was disabled on API 29 for apps targeting it.
-  // https://chromium.googlesource.com/chromium/src/+/master/third_party/ashmem/ashmem-dev.c
+  if (android_ASharedMemory_create_) {
+    int sharedmem_fd = android_ASharedMemory_create_(path.c_str(), length);
+    if (sharedmem_fd >= 0) {
+      return static_cast<FileMappingHandle>(sharedmem_fd);
+    }
+  }
+
+  // Fallback: try memfd_create syscall if available
+#ifdef __NR_memfd_create
+  int memfd = static_cast<int>(syscall(__NR_memfd_create, path.c_str(), 0));
+  if (memfd >= 0) {
+    if (rex_ftruncate64(memfd, static_cast<off_t>(length)) == 0) {
+      return static_cast<FileMappingHandle>(memfd);
+    }
+    close(memfd);
+  }
+#endif
+
   int ashmem_fd = open("/" ASHMEM_NAME_DEF, O_RDWR);
   if (ashmem_fd < 0) {
     return kFileMappingHandleInvalid;

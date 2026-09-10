@@ -45,7 +45,6 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
 #if REX_PLATFORM_ANDROID
 #include <dlfcn.h>
 
-#include <rex/main_android.h>
 #include <rex/string.h>
 #endif
 
@@ -71,15 +70,13 @@ static void* android_libc_;
 static int (*android_pthread_getname_np_)(pthread_t pthread, char* buf, size_t n);
 
 void AndroidInitialize() {
-  if (rex::GetAndroidApiLevel() >= 26) {
-    android_libc_ = dlopen("libc.so", RTLD_NOW);
-    assert_not_null(android_libc_);
-    if (android_libc_) {
-      android_pthread_getname_np_ = reinterpret_cast<decltype(android_pthread_getname_np_)>(
-          dlsym(android_libc_, "pthread_getname_np"));
-      assert_not_null(android_pthread_getname_np_);
-    }
+#if defined(__ANDROID_API__) && __ANDROID_API__ >= 26
+  android_libc_ = dlopen("libc.so", RTLD_NOW);
+  if (android_libc_) {
+    android_pthread_getname_np_ = reinterpret_cast<decltype(android_pthread_getname_np_)>(
+        dlsym(android_libc_, "pthread_getname_np"));
   }
+#endif
 }
 
 void AndroidShutdown() {
@@ -270,7 +267,7 @@ static sem_t* RexCreateAnonymousSemaphore() {
 class PosixConditionBase {
  public:
   PosixConditionBase() {
-#if REX_PLATFORM_LINUX
+#if REX_PLATFORM_LINUX && defined(PTHREAD_MUTEX_ROBUST)
     // Use robust mutexes so waits can recover if owner thread terminates.
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr) == 0) {
@@ -293,11 +290,17 @@ class PosixConditionBase {
 #if REX_PLATFORM_LINUX
     auto native_mutex = static_cast<pthread_mutex_t*>(mutex_.native_handle());
     int lock_result = pthread_mutex_lock(native_mutex);
+#if defined(PTHREAD_MUTEX_ROBUST)
     if (lock_result == EOWNERDEAD) {
       pthread_mutex_consistent(native_mutex);
     } else if (lock_result != 0) {
       return WaitResult::kFailed;
     }
+#else
+    if (lock_result != 0) {
+      return WaitResult::kFailed;
+    }
+#endif
     std::unique_lock<std::mutex> lock(mutex_, std::adopt_lock);
 #else
     std::unique_lock<std::mutex> lock(mutex_);
@@ -347,6 +350,7 @@ class PosixConditionBase {
 #if REX_PLATFORM_LINUX
         auto native_mutex = static_cast<pthread_mutex_t*>(handles[i]->mutex_.native_handle());
         int result = pthread_mutex_trylock(native_mutex);
+#if defined(PTHREAD_MUTEX_ROBUST)
         if (result == 0 || result == EOWNERDEAD) {
           if (result == EOWNERDEAD) {
             pthread_mutex_consistent(native_mutex);
@@ -356,6 +360,14 @@ class PosixConditionBase {
           all_locked = false;
           break;
         }
+#else
+        if (result == 0) {
+          locks.emplace_back(handles[i]->mutex_, std::adopt_lock);
+        } else {
+          all_locked = false;
+          break;
+        }
+#endif
 #else
         locks.emplace_back(handles[i]->mutex_, std::try_to_lock);
         if (!locks.back().owns_lock()) {
@@ -1014,8 +1026,10 @@ class PosixCondition<Thread> : public PosixConditionBase {
   static void* ThreadStartRoutine(void* parameter);
   inline bool signaled() const override { return signaled_; }
   inline void post_execution() override {
-    if (thread_) {
-      pthread_join(thread_, nullptr);
+    pthread_t t = thread_;
+    thread_ = 0;
+    if (t && !pthread_equal(pthread_self(), t)) {
+      pthread_join(t, nullptr);
     }
 #if defined(__APPLE__)
     if (suspend_sem_ != SEM_FAILED) {

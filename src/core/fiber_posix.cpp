@@ -27,6 +27,59 @@ namespace rex::thread {
 
 thread_local Fiber* Fiber::tls_current_ = nullptr;
 
+#if REX_PLATFORM_ANDROID
+
+Fiber* Fiber::ConvertCurrentThread() {
+  auto* f = new Fiber();
+  f->is_thread_fiber_ = true;
+  tls_current_ = f;
+  return f;
+}
+
+Fiber* Fiber::Create(size_t stack_size, void (*entry)(void*), void* arg) {
+  auto* f = new Fiber();
+  f->entry_ = entry;
+  f->arg_ = arg;
+  f->stack_.resize(stack_size);
+
+  setjmp(f->env_);
+  uintptr_t* env_ptr = reinterpret_cast<uintptr_t*>(f->env_);
+  uintptr_t stack_top = reinterpret_cast<uintptr_t>(f->stack_.data() + f->stack_.size());
+  stack_top &= ~15ULL;  // 16-byte alignment
+
+#if defined(__aarch64__)
+  // On Bionic aarch64 jmp_buf: [11] is lr, [12] is sp
+  env_ptr[11] = reinterpret_cast<uintptr_t>(&Fiber::Trampoline);
+  env_ptr[12] = stack_top;
+#endif
+
+  return f;
+}
+
+/*static*/ void Fiber::Trampoline() {
+  Fiber* f = tls_current_;
+  f->entry_(f->arg_);
+}
+
+void Fiber::SwitchTo(Fiber* target) {
+  Fiber* from = tls_current_;
+  tls_current_ = target;
+  if (setjmp(from->env_) == 0) {
+    longjmp(target->env_, 1);
+  }
+}
+
+void Fiber::Destroy() {
+  if (is_thread_fiber_) {
+    tls_current_ = nullptr;
+  } else {
+    assert(this != tls_current_ && "Destroy called on the currently running fiber");
+  }
+  delete this;
+}
+
+#else
+
 Fiber* Fiber::ConvertCurrentThread() {
   auto* f = new Fiber();
   if (getcontext(&f->context_) == -1) {
@@ -78,6 +131,8 @@ void Fiber::Destroy() {
   // No POSIX equivalent of ConvertFiberToThread; stack_ is freed by the vector destructor.
   delete this;
 }
+
+#endif
 
 }  // namespace rex::thread
 
