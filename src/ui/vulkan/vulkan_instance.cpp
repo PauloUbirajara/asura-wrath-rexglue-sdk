@@ -26,6 +26,10 @@
 #endif
 
 REXCVAR_DEFINE_BOOL(vulkan_log_debug_messages, true, "UI/Vulkan", "Log Vulkan debug messages");
+REXCVAR_DEFINE_STRING(adreno_driver_path, "", "UI/Vulkan",
+                      "Path to custom GPU driver directory for Android (Adreno Tools)");
+REXCVAR_DEFINE_STRING(adreno_driver_name, "libvulkan_freedreno.so", "UI/Vulkan",
+                      "Name of custom Vulkan driver library file (Adreno Tools)");
 
 namespace rex {
 namespace ui {
@@ -75,7 +79,22 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     return nullptr;
   }
 #else
-  loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
+#if REX_PLATFORM_ANDROID
+  std::string custom_driver_dir = REXCVAR_GET(adreno_driver_path);
+  std::string custom_driver_name = REXCVAR_GET(adreno_driver_name);
+  if (!custom_driver_dir.empty()) {
+    std::filesystem::path custom_path = std::filesystem::path(custom_driver_dir) / custom_driver_name;
+    if (std::filesystem::exists(custom_path) && vulkan_instance->loader_.Load(custom_path)) {
+      loader_loaded = true;
+      REXLOG_INFO("Loaded custom Adreno/Vulkan driver from {}", custom_path.string());
+    } else {
+      REXLOG_WARN("Custom GPU driver path '{}' requested but could not be loaded; falling back to system Vulkan loader", custom_path.string());
+    }
+  }
+#endif
+  if (!loader_loaded) {
+    loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
+  }
   if (!loader_loaded) {
     REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
     return nullptr;

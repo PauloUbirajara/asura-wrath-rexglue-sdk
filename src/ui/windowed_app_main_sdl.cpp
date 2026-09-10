@@ -52,6 +52,7 @@ int RunWindowedApp(int argc, char** argv) {
   auto remaining = rex::cvar::Init(argc, argv);
   rex::cvar::ApplyEnvironment();
   rex::InitLoggingEarly();
+  rex::cvar::LogAllFlags();
 
   int result;
   {

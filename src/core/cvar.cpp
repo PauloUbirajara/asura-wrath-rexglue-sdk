@@ -711,6 +711,15 @@ void SaveConfig(const std::filesystem::path& config_path) {
   }
 }
 
+void LogAllFlags() {
+  REXLOG_INFO("=== ReXGlue Configuration Flags ===");
+  for (const auto& entry : GetRegistryStorage()) {
+    std::string val = entry.getter ? entry.getter() : "<unknown>";
+    REXLOG_INFO("[cvar] --{} = {}", entry.name, val);
+  }
+  REXLOG_INFO("===================================");
+}
+
 namespace testing {
 
 ScopedLifecycleOverride::ScopedLifecycleOverride() {

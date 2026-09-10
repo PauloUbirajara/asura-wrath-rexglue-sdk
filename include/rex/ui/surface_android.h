@@ -17,13 +17,13 @@ class AndroidNativeWindowSurface final : public Surface {
   explicit AndroidNativeWindowSurface(ANativeWindow* window, SDL_Window* sdl_window)
       : window_(window), sdl_window_(sdl_window) {}
   TypeIndex GetType() const override { return kTypeIndex_AndroidNativeWindow; }
-  ANativeWindow* window() const { return window_; }
+  ANativeWindow* window() const;
 
  protected:
   bool GetSizeImpl(uint32_t& width_out, uint32_t& height_out) const override;
 
  private:
-  ANativeWindow* window_;
+  mutable ANativeWindow* window_;
   SDL_Window* sdl_window_;
 };
 

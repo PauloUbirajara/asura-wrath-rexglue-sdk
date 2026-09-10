@@ -238,6 +238,7 @@ void ResetToDefault(std::string_view name);
 void ResetAllToDefaults();
 bool HasNonDefaultValue(std::string_view name);
 std::vector<std::string> ListModifiedFlags();
+void LogAllFlags();
 std::string SerializeToTOML();
 std::string SerializeToTOML(std::string_view category);
 
