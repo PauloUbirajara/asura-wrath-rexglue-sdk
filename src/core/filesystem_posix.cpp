@@ -49,6 +49,11 @@ using rex_off64_t = off64_t;
 #define rex_ftruncate64 ftruncate64
 #endif
 
+#if defined(__ANDROID__)
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_system.h>
+#endif
+
 namespace rex {
 
 std::string path_to_utf8(const std::filesystem::path& path) {
@@ -100,10 +105,33 @@ std::filesystem::path GetExecutablePath() {
 }
 
 std::filesystem::path GetExecutableFolder() {
+#if defined(__ANDROID__)
+  return GetUserFolder();
+#else
   return GetExecutablePath().parent_path();
+#endif
 }
 
 std::filesystem::path GetUserFolder() {
+#if defined(__ANDROID__)
+  const char* ext_path = SDL_GetAndroidExternalStoragePath();
+  if (ext_path && *ext_path) {
+    return std::filesystem::path(ext_path);
+  }
+  const char* int_path = SDL_GetAndroidInternalStoragePath();
+  if (int_path && *int_path) {
+    return std::filesystem::path(int_path);
+  }
+  const char* base_path = SDL_GetBasePath();
+  if (base_path && *base_path) {
+    return std::filesystem::path(base_path);
+  }
+  auto cwd = std::filesystem::current_path();
+  if (!cwd.empty() && cwd != "/") {
+    return cwd;
+  }
+  return std::filesystem::path("/storage/emulated/0/Android/data/com.recomp.asurawrath/files");
+#else
   // get preferred data home
   if (auto xdg = rex::platform::env::get("XDG_DATA_HOME")) {
     return std::filesystem::path(*xdg);
@@ -121,6 +149,7 @@ std::filesystem::path GetUserFolder() {
   getpwuid_r(getuid(), &pw1, buf, sizeof(buf), &pw);
   assert(&pw1 == pw);  // sanity check
   return std::filesystem::path(pw->pw_dir) / ".local" / "share";
+#endif
 }
 
 FILE* OpenFile(const std::filesystem::path& path, const std::string_view mode) {
@@ -301,6 +330,21 @@ std::vector<FileInfo> ListFiles(const std::filesystem::path& path) {
   closedir(dir);
   return result;
 }
+
+#if REX_PLATFORM_ANDROID
+bool IsAndroidContentUri(const std::string_view source) {
+  return rex::string::utf8_starts_with(source, "content://");
+}
+
+int OpenAndroidContentFileDescriptor(const std::string_view uri, const char* mode) {
+  (void)mode;
+  // If uri is an integer file descriptor string (e.g. "/proc/self/fd/N" or "fd:N")
+  if (rex::string::utf8_starts_with(uri, "fd:")) {
+    return std::stoi(std::string(uri.substr(3)));
+  }
+  return -1;
+}
+#endif
 
 }  // namespace filesystem
 }  // namespace rex

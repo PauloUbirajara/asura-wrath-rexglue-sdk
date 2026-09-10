@@ -35,6 +35,9 @@
 #include <SDL3/SDL_metal.h>
 
 #include <rex/ui/surface_mac.h>
+#elif REX_PLATFORM_ANDROID
+#include <android/native_window.h>
+#include <rex/ui/surface_android.h>
 #else
 #include <X11/Xlib-xcb.h>
 #include <rex/ui/surface_gnulinux.h>
@@ -134,6 +137,9 @@ WindowSDL::~WindowSDL() {
 }
 
 bool WindowSDL::OpenImpl() {
+#if REX_PLATFORM_ANDROID
+  SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight");
+#endif
   // SDL window coordinates are physical pixels on Windows and X11. Cocoa
   // uses logical points and applies the backing scale itself.
   SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
@@ -397,6 +403,14 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
       }
       SDL_Metal_DestroyView(metal_view);
     }
+#elif REX_PLATFORM_ANDROID
+  if (allowed_types & Surface::kTypeFlag_AndroidNativeWindow) {
+    SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
+    auto* native_window = static_cast<ANativeWindow*>(
+        SDL_GetPointerProperty(props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    if (native_window) {
+      return std::make_unique<AndroidNativeWindowSurface>(native_window, sdl_window_);
+    }
   }
 #else
   SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
@@ -442,10 +456,12 @@ void WindowSDL::HandlePaintEvent() {
 void WindowSDL::HandleWindowEvent(SDL_Event& event) {
   WindowDestructionReceiver destruction_receiver(this);
   switch (event.type) {
-    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-      OnActualSizeUpdate(uint32_t(event.window.data1), uint32_t(event.window.data2),
-                         destruction_receiver);
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+      uint32_t w = uint32_t(event.window.data1);
+      uint32_t h = uint32_t(event.window.data2);
+      OnActualSizeUpdate(w, h, destruction_receiver);
       break;
+    }
     case SDL_EVENT_WINDOW_RESIZED: {
       // Track the user-driven size as the desired size for the normal state
       // only (mirrors the Win32 WM_SIZE handling).

@@ -55,18 +55,34 @@ std::vector<platform::DynamicLibrary>& LoadedPlugins() {
 }  // namespace
 
 std::unique_ptr<IGraphicsSystem> LoadGpuPlugin(std::string_view name, std::string_view backend) {
-  auto path = rex::filesystem::GetExecutableFolder() / PluginFileName(name);
-  if (!std::filesystem::exists(path)) {
-    REXSYS_ERROR(
-        "GPU plugin '{}' not found at {}. Stage it next to the executable "
-        "(GPU_PLUGINS {} in rexglue_configure_target).",
-        name, path.string(), name);
-    return nullptr;
+  platform::DynamicLibrary library;
+  std::filesystem::path path;
+
+  std::vector<std::filesystem::path> candidates = {
+      fmt::format("librexgpu-{}.so", name),
+      PluginFileName(name),
+      rex::filesystem::GetExecutableFolder() / PluginFileName(name),
+      rex::filesystem::GetExecutableFolder() / fmt::format("librexgpu-{}.so", name),
+  };
+
+  bool loaded = false;
+  for (const auto& candidate : candidates) {
+    std::error_code ec;
+    if (candidate.is_absolute() && !std::filesystem::exists(candidate, ec)) {
+      continue;
+    }
+    if (library.Load(candidate, platform::SymbolResolution::kImmediate)) {
+      path = candidate;
+      loaded = true;
+      break;
+    }
   }
 
-  platform::DynamicLibrary library;
-  if (!library.Load(path, platform::SymbolResolution::kImmediate)) {
-    REXSYS_ERROR("GPU plugin '{}' failed to load: {}", name, path.string());
+  if (!loaded) {
+    REXSYS_ERROR(
+        "GPU plugin '{}' not found or failed to load. Stage it next to the executable "
+        "(GPU_PLUGINS {} in rexglue_configure_target).",
+        name, name);
     return nullptr;
   }
 

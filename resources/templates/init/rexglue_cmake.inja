@@ -114,17 +114,21 @@ endmacro()
 # codegen, including one a project assembles itself rather than taking the
 # library rexglue_setup_target() builds. The stamp comes first: the DEPFILE
 # names it.
-add_custom_command(
-    OUTPUT "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.build.stamp"
-           {{ cmake_var("REXGLUE_ENTRYPOINT_GENERATED_SOURCES") }}
-    COMMAND $<TARGET_FILE:rex::rexglue> codegen {{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ names.snake_case }}_manifest.toml
-    DEPFILE "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.d"
-    WORKING_DIRECTORY {{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}
-    COMMENT "Generating recompiled code for {{ names.snake_case }}"
-    VERBATIM
-)
-add_custom_target({{ names.snake_case }}_codegen
-    DEPENDS "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.build.stamp")
+if(NOT CMAKE_CROSSCOMPILING)
+    add_custom_command(
+        OUTPUT "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.build.stamp"
+               {{ cmake_var("REXGLUE_ENTRYPOINT_GENERATED_SOURCES") }}
+        COMMAND $<TARGET_FILE:rex::rexglue> codegen {{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ names.snake_case }}_manifest.toml
+        DEPFILE "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.d"
+        WORKING_DIRECTORY {{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}
+        COMMENT "Generating recompiled code for {{ names.snake_case }}"
+        VERBATIM
+    )
+    add_custom_target({{ names.snake_case }}_codegen
+        DEPENDS "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/codegen.build.stamp")
+else()
+    add_custom_target({{ names.snake_case }}_codegen)
+endif()
 
 # Include DLL module shared library targets if codegen has generated them
 if(EXISTS "{{ cmake_var("CMAKE_CURRENT_SOURCE_DIR") }}/{{ entrypoint_out_dir }}/dll_targets.cmake")

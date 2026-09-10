@@ -16,6 +16,7 @@
 #include <string>
 #include <vector>
 
+#include <SDL3/SDL_main.h>
 #include <rex/cvar.h>
 #include <rex/logging.h>
 #include <rex/platform.h>
@@ -34,9 +35,20 @@
 #include <shellapi.h>
 #endif
 
+#include <filesystem>
+#include <SDL3/SDL.h>
+
 namespace {
 
 int RunWindowedApp(int argc, char** argv) {
+#if REX_PLATFORM_ANDROID
+  const char* base_path = SDL_GetBasePath();
+  if (base_path && *base_path) {
+    std::filesystem::create_directories(base_path);
+    std::filesystem::current_path(base_path);
+  }
+#endif
+
   auto remaining = rex::cvar::Init(argc, argv);
   rex::cvar::ApplyEnvironment();
   rex::InitLoggingEarly();
