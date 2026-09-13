@@ -24,6 +24,7 @@
 #include <set>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -470,6 +471,10 @@ class VulkanPipelineCache {
   std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads_;
 
   VkPipelineCache vulkan_pipeline_cache_ = VK_NULL_HANDLE;
+
+  std::mutex pso_mutex_;
+  std::unordered_set<uint64_t> pending_compilations_;
+  VkPipeline dummy_fallback_pipeline_ = VK_NULL_HANDLE;
 };
 
 }  // namespace rex::graphics::vulkan

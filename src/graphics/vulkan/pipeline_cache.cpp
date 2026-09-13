@@ -3017,6 +3017,661 @@ bool VulkanPipelineCache::TryGetPipelineCreationArgumentsForDescription(
   return true;
 }
 
+// bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
+// creation_arguments,
+//                                                 VkShaderModule fragment_shader_override) {
+//   VkPipeline existing_pipeline =
+//       creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+//   bool is_placeholder =
+//       creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+//   bool creating_placeholder = fragment_shader_override != VK_NULL_HANDLE;
+//   if (existing_pipeline != VK_NULL_HANDLE) {
+//     if (!is_placeholder || creating_placeholder) {
+//       return true;
+//     }
+//   }
+
+//   // This function preferably should validate the description to prevent
+//   // unsupported behavior that may be dangerous/crashing because pipelines can
+//   // be created from the disk storage.
+
+//   if (creation_arguments.pixel_shader) {
+//     REXGPU_INFO("Creating graphics pipeline state with VS {:016X}, PS {:016X}",
+//                 creation_arguments.vertex_shader->shader().ucode_data_hash(),
+//                 creation_arguments.pixel_shader->shader().ucode_data_hash());
+//   } else {
+//     REXGPU_INFO("Creating graphics pipeline state with VS {:016X}",
+//                 creation_arguments.vertex_shader->shader().ucode_data_hash());
+//   }
+
+//   const PipelineDescription& description = creation_arguments.pipeline->first;
+//   if (!ArePipelineRequirementsMet(description)) {
+//     assert_always(
+//         "When creating a new pipeline, the description must not require "
+//         "unsupported features, and when loading the pipeline storage, "
+//         "pipelines with unsupported features must be filtered out");
+//     return false;
+//   }
+
+//   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
+
+//   bool edram_fragment_shader_interlock =
+//       render_target_cache_.GetPath() == RenderTargetCache::Path::kPixelShaderInterlock;
+
+//   bool tessellated = description.primitive_topology == PipelinePrimitiveTopology::kPatchList;
+
+//   std::array<VkPipelineShaderStageCreateInfo, 5> shader_stages;
+//   uint32_t shader_stage_count = 0;
+
+//   // Vertex or tessellation evaluation shader (plus helper stages for tessellation).
+//   assert_true(creation_arguments.vertex_shader->is_translated());
+//   if (!creation_arguments.vertex_shader->is_valid()) {
+//     return false;
+//   }
+//   if (tessellated) {
+//     if (creation_arguments.tessellation_vertex_shader == VK_NULL_HANDLE ||
+//         creation_arguments.tessellation_control_shader == VK_NULL_HANDLE ||
+//         !creation_arguments.tessellation_patch_control_points) {
+//       return false;
+//     }
+
+//     VkPipelineShaderStageCreateInfo& shader_stage_vertex = shader_stages[shader_stage_count++];
+//     shader_stage_vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//     shader_stage_vertex.pNext = nullptr;
+//     shader_stage_vertex.flags = 0;
+//     shader_stage_vertex.stage = VK_SHADER_STAGE_VERTEX_BIT;
+//     shader_stage_vertex.module = creation_arguments.tessellation_vertex_shader;
+//     shader_stage_vertex.pName = "main";
+//     shader_stage_vertex.pSpecializationInfo = nullptr;
+
+//     VkPipelineShaderStageCreateInfo& shader_stage_tess_control =
+//         shader_stages[shader_stage_count++];
+//     shader_stage_tess_control.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//     shader_stage_tess_control.pNext = nullptr;
+//     shader_stage_tess_control.flags = 0;
+//     shader_stage_tess_control.stage = VK_SHADER_STAGE_TESSELLATION_CONTROL_BIT;
+//     shader_stage_tess_control.module = creation_arguments.tessellation_control_shader;
+//     shader_stage_tess_control.pName = "main";
+//     shader_stage_tess_control.pSpecializationInfo = nullptr;
+
+//     VkPipelineShaderStageCreateInfo& shader_stage_tess_eval =
+//     shader_stages[shader_stage_count++]; shader_stage_tess_eval.sType =
+//     VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO; shader_stage_tess_eval.pNext = nullptr;
+//     shader_stage_tess_eval.flags = 0;
+//     shader_stage_tess_eval.stage = VK_SHADER_STAGE_TESSELLATION_EVALUATION_BIT;
+//     shader_stage_tess_eval.module = creation_arguments.vertex_shader->shader_module();
+//     assert_true(shader_stage_tess_eval.module != VK_NULL_HANDLE);
+//     shader_stage_tess_eval.pName = "main";
+//     shader_stage_tess_eval.pSpecializationInfo = nullptr;
+//   } else {
+//     VkPipelineShaderStageCreateInfo& shader_stage_vertex = shader_stages[shader_stage_count++];
+//     shader_stage_vertex.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//     shader_stage_vertex.pNext = nullptr;
+//     shader_stage_vertex.flags = 0;
+//     shader_stage_vertex.stage = VK_SHADER_STAGE_VERTEX_BIT;
+//     shader_stage_vertex.module = creation_arguments.vertex_shader->shader_module();
+//     assert_true(shader_stage_vertex.module != VK_NULL_HANDLE);
+//     shader_stage_vertex.pName = "main";
+//     shader_stage_vertex.pSpecializationInfo = nullptr;
+//   }
+//   // Geometry shader.
+//   if (creation_arguments.geometry_shader != VK_NULL_HANDLE) {
+//     if (tessellated) {
+//       return false;
+//     }
+//     VkPipelineShaderStageCreateInfo& shader_stage_geometry = shader_stages[shader_stage_count++];
+//     shader_stage_geometry.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//     shader_stage_geometry.pNext = nullptr;
+//     shader_stage_geometry.flags = 0;
+//     shader_stage_geometry.stage = VK_SHADER_STAGE_GEOMETRY_BIT;
+//     shader_stage_geometry.module = creation_arguments.geometry_shader;
+//     shader_stage_geometry.pName = "main";
+//     shader_stage_geometry.pSpecializationInfo = nullptr;
+//   }
+//   // Fragment shader.
+//   VkPipelineShaderStageCreateInfo& shader_stage_fragment = shader_stages[shader_stage_count++];
+//   shader_stage_fragment.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+//   shader_stage_fragment.pNext = nullptr;
+//   shader_stage_fragment.flags = 0;
+//   shader_stage_fragment.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+//   shader_stage_fragment.module = VK_NULL_HANDLE;
+//   shader_stage_fragment.pName = "main";
+//   shader_stage_fragment.pSpecializationInfo = nullptr;
+//   if (fragment_shader_override != VK_NULL_HANDLE) {
+//     shader_stage_fragment.module = fragment_shader_override;
+//   } else if (creation_arguments.pixel_shader) {
+//     assert_true(creation_arguments.pixel_shader->is_translated());
+//     if (!creation_arguments.pixel_shader->is_valid()) {
+//       return false;
+//     }
+//     shader_stage_fragment.module = creation_arguments.pixel_shader->shader_module();
+//     assert_true(shader_stage_fragment.module != VK_NULL_HANDLE);
+//   } else {
+//     if (edram_fragment_shader_interlock) {
+//       shader_stage_fragment.module = depth_only_fragment_shader_;
+//     } else if (render_target_cache_.depth_float24_convert_in_pixel_shader() &&
+//                (description.render_pass_key.depth_and_color_used & 1) &&
+//                (description.depth_compare_op != xenos::CompareFunction::kAlways ||
+//                 description.depth_write_enable) &&
+//                description.render_pass_key.depth_format ==
+//                    xenos::DepthRenderTargetFormat::kD24FS8) {
+//       shader_stage_fragment.module = render_target_cache_.depth_float24_round()
+//                                          ? depth_float24_round_fragment_shader_
+//                                          : depth_float24_truncate_fragment_shader_;
+//       if (shader_stage_fragment.module == VK_NULL_HANDLE) {
+//         return false;
+//       }
+//     }
+//   }
+//   if (shader_stage_fragment.module == VK_NULL_HANDLE) {
+//     --shader_stage_count;
+//   }
+
+//   VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
+//   vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+
+//   VkPipelineInputAssemblyStateCreateInfo input_assembly_state;
+//   input_assembly_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+//   input_assembly_state.pNext = nullptr;
+//   input_assembly_state.flags = 0;
+//   switch (description.primitive_topology) {
+//     case PipelinePrimitiveTopology::kPointList:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+//       assert_false(description.primitive_restart);
+//       if (description.primitive_restart) {
+//         return false;
+//       }
+//       break;
+//     case PipelinePrimitiveTopology::kLineList:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+//       assert_false(description.primitive_restart);
+//       if (description.primitive_restart) {
+//         return false;
+//       }
+//       break;
+//     case PipelinePrimitiveTopology::kLineStrip:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+//       break;
+//     case PipelinePrimitiveTopology::kTriangleList:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+//       assert_false(description.primitive_restart);
+//       if (description.primitive_restart) {
+//         return false;
+//       }
+//       break;
+//     case PipelinePrimitiveTopology::kTriangleStrip:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+//       break;
+//     case PipelinePrimitiveTopology::kTriangleFan:
+//       // Keep parity with D3D12 by requiring triangle fan to list conversion in
+//       // PrimitiveProcessor rather than emitting native fan pipelines.
+//       assert_always();
+//       return false;
+//     case PipelinePrimitiveTopology::kLineListWithAdjacency:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST_WITH_ADJACENCY;
+//       assert_false(description.primitive_restart);
+//       if (description.primitive_restart) {
+//         return false;
+//       }
+//       break;
+//     case PipelinePrimitiveTopology::kPatchList:
+//       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_PATCH_LIST;
+//       assert_false(description.primitive_restart);
+//       if (description.primitive_restart) {
+//         return false;
+//       }
+//       break;
+//     default:
+//       assert_unhandled_case(description.primitive_topology);
+//       return false;
+//   }
+//   input_assembly_state.primitiveRestartEnable = description.primitive_restart ? VK_TRUE :
+//   VK_FALSE;
+
+//   VkPipelineViewportStateCreateInfo viewport_state;
+//   viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+//   viewport_state.pNext = nullptr;
+//   viewport_state.flags = 0;
+//   viewport_state.viewportCount = 1;
+//   viewport_state.pViewports = nullptr;
+//   viewport_state.scissorCount = 1;
+//   viewport_state.pScissors = nullptr;
+
+//   VkPipelineRasterizationStateCreateInfo rasterization_state = {};
+//   rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+//   rasterization_state.rasterizerDiscardEnable = description.rasterizer_discard ? VK_TRUE :
+//   VK_FALSE; rasterization_state.depthClampEnable = description.depth_clamp_enable ? VK_TRUE :
+//   VK_FALSE; switch (description.polygon_mode) {
+//     case PipelinePolygonMode::kFill:
+//       rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
+//       break;
+//     case PipelinePolygonMode::kLine:
+//       rasterization_state.polygonMode = VK_POLYGON_MODE_LINE;
+//       break;
+//     case PipelinePolygonMode::kPoint:
+//       rasterization_state.polygonMode = VK_POLYGON_MODE_POINT;
+//       break;
+//     default:
+//       assert_unhandled_case(description.polygon_mode);
+//       return false;
+//   }
+//   rasterization_state.cullMode = VK_CULL_MODE_NONE;
+//   if (description.cull_front) {
+//     rasterization_state.cullMode |= VK_CULL_MODE_FRONT_BIT;
+//   }
+//   if (description.cull_back) {
+//     rasterization_state.cullMode |= VK_CULL_MODE_BACK_BIT;
+//   }
+//   rasterization_state.frontFace =
+//       description.front_face_clockwise ? VK_FRONT_FACE_CLOCKWISE :
+//       VK_FRONT_FACE_COUNTER_CLOCKWISE;
+//   // Depth bias is dynamic (even toggling - pipeline creation is expensive).
+//   // "If no depth attachment is present, r is undefined" in the depth bias
+//   // formula, though Z has no effect on anything if a depth attachment is not
+//   // used (the guest shader can't access Z), enabling only when there's a
+//   // depth / stencil attachment for correctness.
+//   rasterization_state.depthBiasEnable =
+//       (!edram_fragment_shader_interlock && (description.render_pass_key.depth_and_color_used &
+//       0b1))
+//           ? VK_TRUE
+//           : VK_FALSE;
+//   // TODO(Triang3l): Wide lines.
+//   rasterization_state.lineWidth = 1.0f;
+
+//   bool subpass_has_attachments =
+//       !edram_fragment_shader_interlock && description.render_pass_key.depth_and_color_used != 0;
+//   VkSampleMask sample_mask = UINT32_MAX;
+//   VkPipelineMultisampleStateCreateInfo multisample_state = {};
+//   multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+//   if (description.rasterizer_discard) {
+//     // Keep rasterizer-discard pipelines independent from guest MSAA state, as
+//     // done by D3D12 when rasterization is disabled.
+//     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+//   } else if (!edram_fragment_shader_interlock && !subpass_has_attachments) {
+//     // Keep parity with D3D12 host-render-target path, where draws without
+//     // color/depth attachments must run at 1x sample count.
+//     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+//   } else if (description.render_pass_key.msaa_samples == xenos::MsaaSamples::k2X &&
+//              !render_target_cache_.IsMsaa2xSupported(subpass_has_attachments)) {
+//     // Using sample 0 as 0 and 3 as 1 for 2x instead (not exactly the same
+//     // sample locations, but still top-left and bottom-right - however, this can
+//     // be adjusted with custom sample locations).
+//     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
+//     // Keep parity with D3D12 ROV: sample masks are ignored without attachments.
+//     if (subpass_has_attachments) {
+//       sample_mask = 0b1001;
+//       multisample_state.pSampleMask = &sample_mask;
+//     }
+//   } else {
+//     multisample_state.rasterizationSamples =
+//         VkSampleCountFlagBits(uint32_t(1) << uint32_t(description.render_pass_key.msaa_samples));
+//   }
+//   if (description.sample_rate_shading &&
+//       multisample_state.rasterizationSamples != VK_SAMPLE_COUNT_1_BIT) {
+//     multisample_state.sampleShadingEnable = VK_TRUE;
+//     multisample_state.minSampleShading = 1.0f;
+//   }
+
+//   VkPipelineDepthStencilStateCreateInfo depth_stencil_state = {};
+//   depth_stencil_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+//   depth_stencil_state.pNext = nullptr;
+//   if (!edram_fragment_shader_interlock) {
+//     if (description.depth_write_enable ||
+//         description.depth_compare_op != xenos::CompareFunction::kAlways) {
+//       depth_stencil_state.depthTestEnable = VK_TRUE;
+//       depth_stencil_state.depthWriteEnable = description.depth_write_enable ? VK_TRUE : VK_FALSE;
+//       depth_stencil_state.depthCompareOp =
+//           VkCompareOp(uint32_t(VK_COMPARE_OP_NEVER) + uint32_t(description.depth_compare_op));
+//     }
+//     if (description.stencil_test_enable) {
+//       depth_stencil_state.stencilTestEnable = VK_TRUE;
+//       depth_stencil_state.front.failOp =
+//           VkStencilOp(uint32_t(VK_STENCIL_OP_KEEP) +
+//           uint32_t(description.stencil_front_fail_op));
+//       depth_stencil_state.front.passOp =
+//           VkStencilOp(uint32_t(VK_STENCIL_OP_KEEP) +
+//           uint32_t(description.stencil_front_pass_op));
+//       depth_stencil_state.front.depthFailOp = VkStencilOp(
+//           uint32_t(VK_STENCIL_OP_KEEP) + uint32_t(description.stencil_front_depth_fail_op));
+//       depth_stencil_state.front.compareOp = VkCompareOp(
+//           uint32_t(VK_COMPARE_OP_NEVER) + uint32_t(description.stencil_front_compare_op));
+//       depth_stencil_state.back.failOp =
+//           VkStencilOp(uint32_t(VK_STENCIL_OP_KEEP) + uint32_t(description.stencil_back_fail_op));
+//       depth_stencil_state.back.passOp =
+//           VkStencilOp(uint32_t(VK_STENCIL_OP_KEEP) + uint32_t(description.stencil_back_pass_op));
+//       depth_stencil_state.back.depthFailOp = VkStencilOp(
+//           uint32_t(VK_STENCIL_OP_KEEP) + uint32_t(description.stencil_back_depth_fail_op));
+//       depth_stencil_state.back.compareOp = VkCompareOp(
+//           uint32_t(VK_COMPARE_OP_NEVER) + uint32_t(description.stencil_back_compare_op));
+//     }
+//   }
+
+//   VkPipelineColorBlendStateCreateInfo color_blend_state = {};
+//   color_blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+//   VkPipelineColorBlendAttachmentState color_blend_attachments[xenos::kMaxColorRenderTargets] =
+//   {}; if (!edram_fragment_shader_interlock) {
+//     uint32_t color_rts_used = description.render_pass_key.depth_and_color_used >> 1;
+//     {
+//       static const VkBlendFactor kBlendFactorMap[] = {
+//           VK_BLEND_FACTOR_ZERO,
+//           VK_BLEND_FACTOR_ONE,
+//           VK_BLEND_FACTOR_SRC_COLOR,
+//           VK_BLEND_FACTOR_ONE_MINUS_SRC_COLOR,
+//           VK_BLEND_FACTOR_DST_COLOR,
+//           VK_BLEND_FACTOR_ONE_MINUS_DST_COLOR,
+//           VK_BLEND_FACTOR_SRC_ALPHA,
+//           VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+//           VK_BLEND_FACTOR_DST_ALPHA,
+//           VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA,
+//           VK_BLEND_FACTOR_CONSTANT_COLOR,
+//           VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_COLOR,
+//           VK_BLEND_FACTOR_CONSTANT_ALPHA,
+//           VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA,
+//           VK_BLEND_FACTOR_SRC_ALPHA_SATURATE,
+//       };
+//       // 8 entries for safety since 3 bits from the guest are passed directly.
+//       static const VkBlendOp kBlendOpMap[] = {VK_BLEND_OP_ADD,
+//                                               VK_BLEND_OP_SUBTRACT,
+//                                               VK_BLEND_OP_MIN,
+//                                               VK_BLEND_OP_MAX,
+//                                               VK_BLEND_OP_REVERSE_SUBTRACT,
+//                                               VK_BLEND_OP_ADD,
+//                                               VK_BLEND_OP_ADD,
+//                                               VK_BLEND_OP_ADD};
+//       assert_true(vulkan_device->properties().independentBlend);
+//       uint32_t color_rts_remaining = color_rts_used;
+//       uint32_t color_rt_index;
+//       while (rex::bit_scan_forward(color_rts_remaining, &color_rt_index)) {
+//         color_rts_remaining &= ~(uint32_t(1) << color_rt_index);
+//         VkPipelineColorBlendAttachmentState& color_blend_attachment =
+//             color_blend_attachments[color_rt_index];
+//         const PipelineRenderTarget& color_rt = description.render_targets[color_rt_index];
+//         if (color_rt.src_color_blend_factor != PipelineBlendFactor::kOne ||
+//             color_rt.dst_color_blend_factor != PipelineBlendFactor::kZero ||
+//             color_rt.color_blend_op != xenos::BlendOp::kAdd ||
+//             color_rt.src_alpha_blend_factor != PipelineBlendFactor::kOne ||
+//             color_rt.dst_alpha_blend_factor != PipelineBlendFactor::kZero ||
+//             color_rt.alpha_blend_op != xenos::BlendOp::kAdd) {
+//           color_blend_attachment.blendEnable = VK_TRUE;
+//           color_blend_attachment.srcColorBlendFactor =
+//               kBlendFactorMap[uint32_t(color_rt.src_color_blend_factor)];
+//           color_blend_attachment.dstColorBlendFactor =
+//               kBlendFactorMap[uint32_t(color_rt.dst_color_blend_factor)];
+//           color_blend_attachment.colorBlendOp = kBlendOpMap[uint32_t(color_rt.color_blend_op)];
+//           color_blend_attachment.srcAlphaBlendFactor =
+//               kBlendFactorMap[uint32_t(color_rt.src_alpha_blend_factor)];
+//           color_blend_attachment.dstAlphaBlendFactor =
+//               kBlendFactorMap[uint32_t(color_rt.dst_alpha_blend_factor)];
+//           color_blend_attachment.alphaBlendOp = kBlendOpMap[uint32_t(color_rt.alpha_blend_op)];
+//         }
+//         color_blend_attachment.colorWriteMask = VkColorComponentFlags(color_rt.color_write_mask);
+//       }
+//     }
+//     color_blend_state.attachmentCount = 32 - rex::lzcnt(color_rts_used);
+//     color_blend_state.pAttachments = color_blend_attachments;
+//   }
+
+//   std::array<VkDynamicState, 7> dynamic_states;
+//   uint32_t dynamic_state_count = 0;
+//   dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+//   dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
+//   dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_BLEND_CONSTANTS;
+//   dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_REFERENCE;
+//   if (!edram_fragment_shader_interlock) {
+//     if (rasterization_state.depthBiasEnable) {
+//       dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+//     }
+//     if (depth_stencil_state.stencilTestEnable) {
+//       dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK;
+//       dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_WRITE_MASK;
+//     }
+//   }
+
+//   VkPipelineDynamicStateCreateInfo dynamic_state = {};
+//   dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+//   dynamic_state.dynamicStateCount = dynamic_state_count;
+//   dynamic_state.pDynamicStates = dynamic_states.data();
+
+//   // Dynamic rendering info setup if applicable
+//   bool use_dynamic_rendering =
+//       render_target_cache_.GetPath() == RenderTargetCache::Path::kHostRenderTargets;
+//   VkPipelineRenderingCreateInfo pipeline_rendering_create_info = {};
+//   VkFormat color_attachment_formats[xenos::kMaxColorRenderTargets] = {};
+
+//   if (use_dynamic_rendering) {
+//     pipeline_rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
+//     pipeline_rendering_create_info.pNext = nullptr;
+//     pipeline_rendering_create_info.viewMask = 0;
+
+//     uint32_t color_rts_used = description.render_pass_key.depth_and_color_used >> 1;
+//     pipeline_rendering_create_info.colorAttachmentCount = 32 - rex::lzcnt(color_rts_used);
+
+//     for (uint32_t i = 0; i < pipeline_rendering_create_info.colorAttachmentCount; ++i) {
+//       color_attachment_formats[i] =
+//           render_target_cache_.GetColorFormat(description.render_targets[i].format);
+//     }
+//     pipeline_rendering_create_info.pColorAttachmentFormats = color_attachment_formats;
+
+//     if (description.render_pass_key.depth_and_color_used & 1) {
+//       pipeline_rendering_create_info.depthAttachmentFormat =
+//           render_target_cache_.GetDepthFormat(description.render_pass_key.depth_format);
+//       pipeline_rendering_create_info.stencilAttachmentFormat =
+//           render_target_cache_.GetStencilFormat(description.render_pass_key.depth_format);
+//     }
+//   }
+
+//   // Define full pipeline creation parameters
+//   VkGraphicsPipelineCreateInfo pipeline_create_info = {};
+//   pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+//   pipeline_create_info.pNext = use_dynamic_rendering ? &pipeline_rendering_create_info : nullptr;
+//   pipeline_create_info.flags = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
+//   pipeline_create_info.stageCount = shader_stage_count;
+//   pipeline_create_info.pStages = shader_stages.data();
+//   pipeline_create_info.pVertexInputState = &vertex_input_state;
+//   pipeline_create_info.pInputAssemblyState = &input_assembly_state;
+//   pipeline_create_info.pTessellationState = tessellated ? &tessellation_state : nullptr;
+//   pipeline_create_info.pViewportState = &viewport_state;
+//   pipeline_create_info.pRasterizationState = &rasterization_state;
+//   pipeline_create_info.pMultisampleState = &multisample_state;
+//   pipeline_create_info.pDepthStencilState = &depth_stencil_state;
+//   pipeline_create_info.pColorBlendState = &color_blend_state;
+//   pipeline_create_info.pDynamicState = &dynamic_state;
+
+//   if (creation_arguments.pipeline_layout == nullptr) {
+//     return false;
+//   }
+//   pipeline_create_info.layout = creation_arguments.pipeline_layout->GetPipelineLayout();
+//   pipeline_create_info.renderPass =
+//       use_dynamic_rendering ? VK_NULL_HANDLE : creation_arguments.render_pass;
+//   pipeline_create_info.subpass = 0;
+//   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
+//   pipeline_create_info.basePipelineIndex = -1;
+
+//   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
+//   const VkDevice device = vulkan_device->device();
+//   const uint64_t pipeline_key_hash = description.hash();
+
+//   // Helper lambda to safely update the atomic pipeline entry
+//   auto update_pipeline_entry = [this, &creation_arguments](VkPipeline new_pipeline,
+//                                                            bool is_placeholder) {
+//     bool was_placeholder =
+//         creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+//     VkPipeline old_pipeline = creation_arguments.pipeline->second.pipeline.exchange(
+//         new_pipeline, std::memory_order_acq_rel);
+//     creation_arguments.pipeline->second.pipeline_layout.store(creation_arguments.pipeline_layout,
+//                                                               std::memory_order_release);
+//     creation_arguments.pipeline->second.is_placeholder.store(is_placeholder,
+//                                                              std::memory_order_release);
+
+//     if (was_placeholder && old_pipeline != VK_NULL_HANDLE && old_pipeline != new_pipeline) {
+//       std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
+//       deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
+//                                                old_pipeline);
+//     }
+//   };
+
+//   // Guard 1: Double-check if pipeline is already compiled
+//   existing_pipeline =
+//   creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire); is_placeholder =
+//       creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+//   if (existing_pipeline != VK_NULL_HANDLE && !is_placeholder) {
+//     return true;
+//   }
+
+//   // Guard 2: Prevent duplicate creation dispatches if already compiling on a background thread
+//   {
+//     std::lock_guard<std::mutex> lock(pso_mutex_);
+//     if (pending_compilations_.count(pipeline_key_hash) > 0) {
+//       return existing_pipeline != VK_NULL_HANDLE;
+//     }
+//   }
+
+//   // Fast path: Attempt non-blocking creation via pipeline cache
+//   VkGraphicsPipelineCreateInfo async_create_info = pipeline_create_info;
+//   async_create_info.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+
+//   VkPipeline compiled_pipeline = VK_NULL_HANDLE;
+//   VkResult create_result = dfn.vkCreateGraphicsPipelines(
+//       device, vulkan_pipeline_cache_, 1, &async_create_info, nullptr, &compiled_pipeline);
+
+//   if (create_result == VK_SUCCESS) {
+//     update_pipeline_entry(compiled_pipeline, false);
+//     return true;
+//   }
+
+//   // Slow path: Async compile miss offload
+//   if (create_result == VK_PIPELINE_COMPILE_REQUIRED ||
+//       create_result == VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT) {
+//     {
+//       std::lock_guard<std::mutex> lock(pso_mutex_);
+//       pending_compilations_.insert(pipeline_key_hash);
+//     }
+
+//     struct AsyncCompileContext {
+//       VkGraphicsPipelineCreateInfo create_info;
+//       VkPipelineRenderingCreateInfo rendering_info;
+//       std::vector<VkFormat> color_formats;
+//       std::vector<VkPipelineShaderStageCreateInfo> stages;
+//       VkPipelineVertexInputStateCreateInfo vertex_input;
+//       VkPipelineInputAssemblyStateCreateInfo input_assembly;
+//       VkPipelineTessellationStateCreateInfo tessellation;
+//       VkPipelineViewportStateCreateInfo viewport;
+//       VkPipelineRasterizationStateCreateInfo rasterization;
+//       VkPipelineMultisampleStateCreateInfo multisample;
+//       VkPipelineDepthStencilStateCreateInfo depth_stencil;
+//       VkPipelineColorBlendStateCreateInfo color_blend;
+//       std::vector<VkPipelineColorBlendAttachmentState> blend_attachments;
+//       VkPipelineDynamicStateCreateInfo dynamic;
+//       std::vector<VkDynamicState> dynamic_states_vec;
+//     };
+
+//     auto ctx = std::make_shared<AsyncCompileContext>();
+
+//     ctx->stages.assign(shader_stages.begin(), shader_stages.begin() + shader_stage_count);
+//     ctx->vertex_input = vertex_input_state;
+//     ctx->input_assembly = input_assembly_state;
+//     if (tessellated)
+//       ctx->tessellation = tessellation_state;
+//     ctx->viewport = viewport_state;
+//     ctx->rasterization = rasterization_state;
+//     ctx->multisample = multisample_state;
+//     ctx->depth_stencil = depth_stencil_state;
+
+//     ctx->color_blend = color_blend_state;
+//     if (color_blend_state.pAttachments && color_blend_state.attachmentCount > 0) {
+//       ctx->blend_attachments.assign(
+//           color_blend_state.pAttachments,
+//           color_blend_state.pAttachments + color_blend_state.attachmentCount);
+//       ctx->color_blend.pAttachments = ctx->blend_attachments.data();
+//     }
+
+//     ctx->dynamic = dynamic_state;
+//     if (dynamic_state.pDynamicStates && dynamic_state.dynamicStateCount > 0) {
+//       ctx->dynamic_states_vec.assign(
+//           dynamic_state.pDynamicStates,
+//           dynamic_state.pDynamicStates + dynamic_state.dynamicStateCount);
+//       ctx->dynamic.pDynamicStates = ctx->dynamic_states_vec.data();
+//     }
+
+//     ctx->create_info = pipeline_create_info;
+//     ctx->create_info.flags &= ~VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+//     ctx->create_info.stageCount = static_cast<uint32_t>(ctx->stages.size());
+//     ctx->create_info.pStages = ctx->stages.data();
+//     ctx->create_info.pVertexInputState = &ctx->vertex_input;
+//     ctx->create_info.pInputAssemblyState = &ctx->input_assembly;
+//     ctx->create_info.pTessellationState = tessellated ? &ctx->tessellation : nullptr;
+//     ctx->create_info.pViewportState = &ctx->viewport;
+//     ctx->create_info.pRasterizationState = &ctx->rasterization;
+//     ctx->create_info.pMultisampleState = &ctx->multisample;
+//     ctx->create_info.pDepthStencilState = &ctx->depth_stencil;
+//     ctx->create_info.pColorBlendState = &ctx->color_blend;
+//     ctx->create_info.pDynamicState = &ctx->dynamic;
+
+//     if (use_dynamic_rendering) {
+//       ctx->rendering_info = pipeline_rendering_create_info;
+//       if (pipeline_rendering_create_info.colorAttachmentCount > 0) {
+//         ctx->color_formats.assign(
+//             color_attachment_formats,
+//             color_attachment_formats + pipeline_rendering_create_info.colorAttachmentCount);
+//         ctx->rendering_info.pColorAttachmentFormats = ctx->color_formats.data();
+//       }
+//       ctx->create_info.pNext = &ctx->rendering_info;
+//     }
+
+//     auto pipeline_entry = creation_arguments.pipeline;
+//     auto pipeline_layout = creation_arguments.pipeline_layout;
+
+//     std::thread([this, device, &dfn, ctx, pipeline_entry, pipeline_layout, pipeline_key_hash]() {
+//       VkPipeline bg_pipeline = VK_NULL_HANDLE;
+//       VkResult res = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
+//                                                    &ctx->create_info, nullptr, &bg_pipeline);
+
+//       if (res == VK_SUCCESS) {
+//         bool was_placeholder =
+//             pipeline_entry->second.is_placeholder.load(std::memory_order_acquire);
+//         VkPipeline old_pipeline =
+//             pipeline_entry->second.pipeline.exchange(bg_pipeline, std::memory_order_acq_rel);
+//         pipeline_entry->second.pipeline_layout.store(pipeline_layout, std::memory_order_release);
+//         pipeline_entry->second.is_placeholder.store(false, std::memory_order_release);
+
+//         if (was_placeholder && old_pipeline != VK_NULL_HANDLE && old_pipeline != bg_pipeline) {
+//           std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
+//           deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
+//                                                    old_pipeline);
+//         }
+//       }
+
+//       std::lock_guard<std::mutex> lock(pso_mutex_);
+//       pending_compilations_.erase(pipeline_key_hash);
+//     }).detach();
+
+//     return existing_pipeline != VK_NULL_HANDLE;
+//   }
+
+//   // Fallback: Driver doesn't support async flag, compile synchronously
+//   create_result = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
+//                                                 &pipeline_create_info, nullptr,
+//                                                 &compiled_pipeline);
+
+//   if (create_result != VK_SUCCESS) {
+//     uint64_t ps_hash = creation_arguments.pixel_shader
+//                            ? creation_arguments.pixel_shader->shader().ucode_data_hash()
+//                            : 0;
+//     REXGPU_ERROR(
+//         "VulkanPipelineCache: vkCreateGraphicsPipelines failed (result={}, vs={:016X}, "
+//         "ps={:016X}, topo={}, geom={}, tess_mode={}, patch_cp={}, render_pass_key=0x{:08X}, "
+//         "dynamic_rendering={})",
+//         int32_t(create_result), creation_arguments.vertex_shader->shader().ucode_data_hash(),
+//         ps_hash, uint32_t(description.primitive_topology), uint32_t(description.geometry_shader),
+//         uint32_t(description.tessellation_mode),
+//         creation_arguments.tessellation_patch_control_points, description.render_pass_key.key,
+//         uint32_t(use_dynamic_rendering));
+//     return false;
+//   }
+
+//   update_pipeline_entry(compiled_pipeline, false);
+//   return true;
+// }
 bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments& creation_arguments,
                                                 VkShaderModule fragment_shader_override) {
   VkPipeline existing_pipeline =
@@ -3029,10 +3684,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
       return true;
     }
   }
-
-  // This function preferably should validate the description to prevent
-  // unsupported behavior that may be dangerous/crashing because pipelines can
-  // be created from the disk storage.
 
   if (creation_arguments.pixel_shader) {
     REXGPU_INFO("Creating graphics pipeline state with VS {:016X}, PS {:016X}",
@@ -3062,7 +3713,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   std::array<VkPipelineShaderStageCreateInfo, 5> shader_stages;
   uint32_t shader_stage_count = 0;
 
-  // Vertex or tessellation evaluation shader (plus helper stages for tessellation).
   assert_true(creation_arguments.vertex_shader->is_translated());
   if (!creation_arguments.vertex_shader->is_valid()) {
     return false;
@@ -3113,7 +3763,7 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
     shader_stage_vertex.pName = "main";
     shader_stage_vertex.pSpecializationInfo = nullptr;
   }
-  // Geometry shader.
+
   if (creation_arguments.geometry_shader != VK_NULL_HANDLE) {
     if (tessellated) {
       return false;
@@ -3127,7 +3777,7 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
     shader_stage_geometry.pName = "main";
     shader_stage_geometry.pSpecializationInfo = nullptr;
   }
-  // Fragment shader.
+
   VkPipelineShaderStageCreateInfo& shader_stage_fragment = shader_stages[shader_stage_count++];
   shader_stage_fragment.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
   shader_stage_fragment.pNext = nullptr;
@@ -3202,8 +3852,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
       break;
     case PipelinePrimitiveTopology::kTriangleFan:
-      // Keep parity with D3D12 by requiring triangle fan to list conversion in
-      // PrimitiveProcessor rather than emitting native fan pipelines.
       assert_always();
       return false;
     case PipelinePrimitiveTopology::kLineListWithAdjacency:
@@ -3262,16 +3910,10 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   }
   rasterization_state.frontFace =
       description.front_face_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
-  // Depth bias is dynamic (even toggling - pipeline creation is expensive).
-  // "If no depth attachment is present, r is undefined" in the depth bias
-  // formula, though Z has no effect on anything if a depth attachment is not
-  // used (the guest shader can't access Z), enabling only when there's a
-  // depth / stencil attachment for correctness.
   rasterization_state.depthBiasEnable =
       (!edram_fragment_shader_interlock && (description.render_pass_key.depth_and_color_used & 0b1))
           ? VK_TRUE
           : VK_FALSE;
-  // TODO(Triang3l): Wide lines.
   rasterization_state.lineWidth = 1.0f;
 
   bool subpass_has_attachments =
@@ -3280,20 +3922,12 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   VkPipelineMultisampleStateCreateInfo multisample_state = {};
   multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
   if (description.rasterizer_discard) {
-    // Keep rasterizer-discard pipelines independent from guest MSAA state, as
-    // done by D3D12 when rasterization is disabled.
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   } else if (!edram_fragment_shader_interlock && !subpass_has_attachments) {
-    // Keep parity with D3D12 host-render-target path, where draws without
-    // color/depth attachments must run at 1x sample count.
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   } else if (description.render_pass_key.msaa_samples == xenos::MsaaSamples::k2X &&
              !render_target_cache_.IsMsaa2xSupported(subpass_has_attachments)) {
-    // Using sample 0 as 0 and 3 as 1 for 2x instead (not exactly the same
-    // sample locations, but still top-left and bottom-right - however, this can
-    // be adjusted with custom sample locations).
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
-    // Keep parity with D3D12 ROV: sample masks are ignored without attachments.
     if (subpass_has_attachments) {
       sample_mask = 0b1001;
       multisample_state.pSampleMask = &sample_mask;
@@ -3363,7 +3997,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
           VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA,
           VK_BLEND_FACTOR_SRC_ALPHA_SATURATE,
       };
-      // 8 entries for safety since 3 bits from the guest are passed directly.
       static const VkBlendOp kBlendOpMap[] = {VK_BLEND_OP_ADD,
                                               VK_BLEND_OP_SUBTRACT,
                                               VK_BLEND_OP_MIN,
@@ -3406,67 +4039,38 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   }
 
   std::array<VkDynamicState, 7> dynamic_states;
-  VkPipelineDynamicStateCreateInfo dynamic_state;
-  dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-  dynamic_state.pNext = nullptr;
-  dynamic_state.flags = 0;
-  dynamic_state.dynamicStateCount = 0;
-  dynamic_state.pDynamicStates = dynamic_states.data();
-  // Regardless of whether some of this state actually has any effect on the
-  // pipeline, marking all as dynamic because otherwise, binding any pipeline
-  // with such state not marked as dynamic will cause the dynamic state to be
-  // invalidated (again, even if it has no effect).
-  dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_VIEWPORT;
-  dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
+  uint32_t dynamic_state_count = 0;
+  dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_VIEWPORT;
+  dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_SCISSOR;
+  dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_BLEND_CONSTANTS;
+  dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_REFERENCE;
   if (!edram_fragment_shader_interlock) {
-    dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
-    dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_BLEND_CONSTANTS;
-    dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK;
-    dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_STENCIL_WRITE_MASK;
-    dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_STENCIL_REFERENCE;
+    if (rasterization_state.depthBiasEnable) {
+      dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_DEPTH_BIAS;
+    }
+    if (depth_stencil_state.stencilTestEnable) {
+      dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_COMPARE_MASK;
+      dynamic_states[dynamic_state_count++] = VK_DYNAMIC_STATE_STENCIL_WRITE_MASK;
+    }
   }
+
+  VkPipelineDynamicStateCreateInfo dynamic_state = {};
+  dynamic_state.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+  dynamic_state.dynamicStateCount = dynamic_state_count;
+  dynamic_state.pDynamicStates = dynamic_states.data();
 
   VkPipelineTessellationStateCreateInfo tessellation_state = {};
   if (tessellated) {
     tessellation_state.sType = VK_STRUCTURE_TYPE_PIPELINE_TESSELLATION_STATE_CREATE_INFO;
+    tessellation_state.pNext = nullptr;
+    tessellation_state.flags = 0;
     tessellation_state.patchControlPoints = creation_arguments.tessellation_patch_control_points;
   }
 
-  VkPipelineRenderingCreateInfo pipeline_rendering_create_info = {};
-  VkFormat color_attachment_formats[xenos::kMaxColorRenderTargets] = {};
-  bool use_dynamic_rendering =
-      REXCVAR_GET(vulkan_dynamic_rendering) && vulkan_device->properties().dynamicRendering;
-  if (use_dynamic_rendering) {
-    pipeline_rendering_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO;
-    pipeline_rendering_create_info.pNext = nullptr;
-    pipeline_rendering_create_info.viewMask = 0;
-
-    uint32_t color_attachment_count = 0;
-    const auto& key = description.render_pass_key;
-    xenos::ColorRenderTargetFormat color_formats[] = {
-        key.color_0_view_format, key.color_1_view_format, key.color_2_view_format,
-        key.color_3_view_format};
-    for (uint32_t i = 0; i < xenos::kMaxColorRenderTargets; ++i) {
-      if (key.depth_and_color_used & (1 << (1 + i))) {
-        color_attachment_formats[i] = render_target_cache_.GetColorVulkanFormat(color_formats[i]);
-        color_attachment_count = i + 1;
-      }
-    }
-    pipeline_rendering_create_info.colorAttachmentCount = color_attachment_count;
-    pipeline_rendering_create_info.pColorAttachmentFormats =
-        color_attachment_count ? color_attachment_formats : nullptr;
-
-    if (key.depth_and_color_used & 0b1) {
-      VkFormat depth_format = render_target_cache_.GetDepthVulkanFormat(key.depth_format);
-      pipeline_rendering_create_info.depthAttachmentFormat = depth_format;
-      pipeline_rendering_create_info.stencilAttachmentFormat = depth_format;
-    }
-  }
-
-  VkGraphicsPipelineCreateInfo pipeline_create_info;
+  VkGraphicsPipelineCreateInfo pipeline_create_info = {};
   pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-  pipeline_create_info.pNext = use_dynamic_rendering ? &pipeline_rendering_create_info : nullptr;
-  pipeline_create_info.flags = 0;
+  pipeline_create_info.pNext = nullptr;
+  pipeline_create_info.flags = VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT;
   pipeline_create_info.stageCount = shader_stage_count;
   pipeline_create_info.pStages = shader_stages.data();
   pipeline_create_info.pVertexInputState = &vertex_input_state;
@@ -3478,53 +4082,185 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   pipeline_create_info.pDepthStencilState = &depth_stencil_state;
   pipeline_create_info.pColorBlendState = &color_blend_state;
   pipeline_create_info.pDynamicState = &dynamic_state;
+
   if (creation_arguments.pipeline_layout == nullptr) {
     return false;
   }
   pipeline_create_info.layout = creation_arguments.pipeline_layout->GetPipelineLayout();
-  pipeline_create_info.renderPass =
-      use_dynamic_rendering ? VK_NULL_HANDLE : creation_arguments.render_pass;
+  pipeline_create_info.renderPass = creation_arguments.render_pass;
   pipeline_create_info.subpass = 0;
   pipeline_create_info.basePipelineHandle = VK_NULL_HANDLE;
   pipeline_create_info.basePipelineIndex = -1;
 
   const ui::vulkan::VulkanDevice::Functions& dfn = vulkan_device->functions();
   const VkDevice device = vulkan_device->device();
-  VkPipeline pipeline;
-  VkResult create_result = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
-                                                         &pipeline_create_info, nullptr, &pipeline);
+
+  const uint64_t pipeline_key = reinterpret_cast<uint64_t>(&creation_arguments.pipeline->second);
+
+  auto update_pipeline_entry = [this, &creation_arguments](VkPipeline new_pipeline,
+                                                           bool is_placeholder) {
+    bool was_placeholder =
+        creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+    VkPipeline old_pipeline = creation_arguments.pipeline->second.pipeline.exchange(
+        new_pipeline, std::memory_order_acq_rel);
+    creation_arguments.pipeline->second.pipeline_layout.store(creation_arguments.pipeline_layout,
+                                                              std::memory_order_release);
+    creation_arguments.pipeline->second.is_placeholder.store(is_placeholder,
+                                                             std::memory_order_release);
+
+    if (was_placeholder && old_pipeline != VK_NULL_HANDLE && old_pipeline != new_pipeline) {
+      std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
+      deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
+                                               old_pipeline);
+    }
+  };
+
+  existing_pipeline = creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
+  is_placeholder =
+      creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
+  if (existing_pipeline != VK_NULL_HANDLE && !is_placeholder) {
+    return true;
+  }
+
+  {
+    std::lock_guard<std::mutex> lock(pso_mutex_);
+    if (pending_compilations_.count(pipeline_key) > 0) {
+      if (!creating_placeholder) {
+        return existing_pipeline != VK_NULL_HANDLE;
+      }
+    }
+  }
+
+  VkGraphicsPipelineCreateInfo async_create_info = pipeline_create_info;
+  async_create_info.flags |= VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+
+  VkPipeline compiled_pipeline = VK_NULL_HANDLE;
+  VkResult create_result = dfn.vkCreateGraphicsPipelines(
+      device, vulkan_pipeline_cache_, 1, &async_create_info, nullptr, &compiled_pipeline);
+
+  if (create_result == VK_SUCCESS) {
+    update_pipeline_entry(compiled_pipeline, creating_placeholder);
+    return true;
+  }
+
+  if (create_result == VK_PIPELINE_COMPILE_REQUIRED ||
+      create_result == VK_ERROR_PIPELINE_COMPILE_REQUIRED_EXT) {
+    {
+      std::lock_guard<std::mutex> lock(pso_mutex_);
+      if (!creating_placeholder) {
+        pending_compilations_.insert(pipeline_key);
+      }
+    }
+
+    if (!creating_placeholder) {
+      struct AsyncCompileContext {
+        VkGraphicsPipelineCreateInfo create_info;
+        std::vector<VkPipelineShaderStageCreateInfo> stages;
+        VkPipelineVertexInputStateCreateInfo vertex_input;
+        VkPipelineInputAssemblyStateCreateInfo input_assembly;
+        VkPipelineTessellationStateCreateInfo tessellation;
+        VkPipelineViewportStateCreateInfo viewport;
+        VkPipelineRasterizationStateCreateInfo rasterization;
+        VkPipelineMultisampleStateCreateInfo multisample;
+        VkPipelineDepthStencilStateCreateInfo depth_stencil;
+        VkPipelineColorBlendStateCreateInfo color_blend;
+        std::vector<VkPipelineColorBlendAttachmentState> blend_attachments;
+        VkPipelineDynamicStateCreateInfo dynamic;
+        std::vector<VkDynamicState> dynamic_states_vec;
+      };
+
+      auto ctx = std::make_shared<AsyncCompileContext>();
+      ctx->stages.assign(shader_stages.begin(), shader_stages.begin() + shader_stage_count);
+      ctx->vertex_input = vertex_input_state;
+      ctx->input_assembly = input_assembly_state;
+      if (tessellated)
+        ctx->tessellation = tessellation_state;
+      ctx->viewport = viewport_state;
+      ctx->rasterization = rasterization_state;
+      ctx->multisample = multisample_state;
+      ctx->depth_stencil = depth_stencil_state;
+
+      ctx->color_blend = color_blend_state;
+      if (color_blend_state.pAttachments && color_blend_state.attachmentCount > 0) {
+        ctx->blend_attachments.assign(
+            color_blend_state.pAttachments,
+            color_blend_state.pAttachments + color_blend_state.attachmentCount);
+        ctx->color_blend.pAttachments = ctx->blend_attachments.data();
+      }
+
+      ctx->dynamic = dynamic_state;
+      if (dynamic_state.pDynamicStates && dynamic_state.dynamicStateCount > 0) {
+        ctx->dynamic_states_vec.assign(
+            dynamic_state.pDynamicStates,
+            dynamic_state.pDynamicStates + dynamic_state.dynamicStateCount);
+        ctx->dynamic.pDynamicStates = ctx->dynamic_states_vec.data();
+      }
+
+      ctx->create_info = pipeline_create_info;
+      ctx->create_info.flags &= ~VK_PIPELINE_CREATE_FAIL_ON_PIPELINE_COMPILE_REQUIRED_BIT;
+      ctx->create_info.stageCount = static_cast<uint32_t>(ctx->stages.size());
+      ctx->create_info.pStages = ctx->stages.data();
+      ctx->create_info.pVertexInputState = &ctx->vertex_input;
+      ctx->create_info.pInputAssemblyState = &ctx->input_assembly;
+      ctx->create_info.pTessellationState = tessellated ? &ctx->tessellation : nullptr;
+      ctx->create_info.pViewportState = &ctx->viewport;
+      ctx->create_info.pRasterizationState = &ctx->rasterization;
+      ctx->create_info.pMultisampleState = &ctx->multisample;
+      ctx->create_info.pDepthStencilState = &ctx->depth_stencil;
+      ctx->create_info.pColorBlendState = &ctx->color_blend;
+      ctx->create_info.pDynamicState = &ctx->dynamic;
+
+      auto pipeline_entry = creation_arguments.pipeline;
+      auto pipeline_layout = creation_arguments.pipeline_layout;
+
+      std::thread([this, device, &dfn, ctx, pipeline_entry, pipeline_layout, pipeline_key]() {
+        VkPipeline bg_pipeline = VK_NULL_HANDLE;
+        VkResult res = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
+                                                     &ctx->create_info, nullptr, &bg_pipeline);
+
+        if (res == VK_SUCCESS) {
+          bool was_placeholder =
+              pipeline_entry->second.is_placeholder.load(std::memory_order_acquire);
+
+          pipeline_entry->second.pipeline_layout.store(pipeline_layout, std::memory_order_release);
+          pipeline_entry->second.is_placeholder.store(false, std::memory_order_release);
+
+          VkPipeline old_pipeline =
+              pipeline_entry->second.pipeline.exchange(bg_pipeline, std::memory_order_acq_rel);
+
+          if (was_placeholder && old_pipeline != VK_NULL_HANDLE && old_pipeline != bg_pipeline) {
+            std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
+            deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
+                                                     old_pipeline);
+          }
+        }
+
+        std::lock_guard<std::mutex> lock(pso_mutex_);
+        pending_compilations_.erase(pipeline_key);
+      }).detach();
+    }
+
+    return existing_pipeline != VK_NULL_HANDLE;
+  }
+
+  create_result = dfn.vkCreateGraphicsPipelines(device, vulkan_pipeline_cache_, 1,
+                                                &pipeline_create_info, nullptr, &compiled_pipeline);
+
   if (create_result != VK_SUCCESS) {
     uint64_t ps_hash = creation_arguments.pixel_shader
                            ? creation_arguments.pixel_shader->shader().ucode_data_hash()
                            : 0;
     REXGPU_ERROR(
         "VulkanPipelineCache: vkCreateGraphicsPipelines failed (result={}, vs={:016X}, "
-        "ps={:016X}, topo={}, geom={}, tess_mode={}, patch_cp={}, render_pass_key=0x{:08X}, "
-        "dynamic_rendering={})",
+        "ps={:016X}, topo={}, geom={}, tess_mode={}, patch_cp={}, render_pass_key=0x{:08X})",
         int32_t(create_result), creation_arguments.vertex_shader->shader().ucode_data_hash(),
         ps_hash, uint32_t(description.primitive_topology), uint32_t(description.geometry_shader),
         uint32_t(description.tessellation_mode),
-        creation_arguments.tessellation_patch_control_points, description.render_pass_key.key,
-        uint32_t(use_dynamic_rendering));
+        creation_arguments.tessellation_patch_control_points, description.render_pass_key.key);
     return false;
   }
-  bool was_placeholder =
-      creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
-  VkPipeline old_pipeline =
-      creation_arguments.pipeline->second.pipeline.exchange(pipeline, std::memory_order_acq_rel);
-  creation_arguments.pipeline->second.pipeline_layout.store(creation_arguments.pipeline_layout,
-                                                            std::memory_order_release);
-  if (creating_placeholder) {
-    creation_arguments.pipeline->second.is_placeholder.store(true, std::memory_order_release);
-  } else {
-    creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
-    if (was_placeholder && old_pipeline != VK_NULL_HANDLE) {
-      std::lock_guard<std::mutex> lock(deferred_destroy_lock_);
-      deferred_destroy_pipelines_.emplace_back(command_processor_.GetCurrentSubmission(),
-                                               old_pipeline);
-    }
-  }
 
+  update_pipeline_entry(compiled_pipeline, creating_placeholder);
   return true;
 }
 
