@@ -1136,17 +1136,26 @@ bool VulkanPipelineCache::ConfigurePipeline(
         bound_rts, shader_writes_color_targets, shader_writes_depth);
   }
 
+  // --- 1. CACHE HIT ---
   auto it = pipelines_.find(description);
   if (it != pipelines_.end()) {
+    // Fast-fail: if previously marked as failed, abort immediately
+    if (it->second.creation_failed.load(std::memory_order_acquire)) {
+      return false;
+    }
+
     VkPipeline found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
     if (found_pipeline == VK_NULL_HANDLE) {
       PipelineCreationArguments creation_arguments;
       if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments) ||
           !EnsurePipelineCreated(creation_arguments)) {
+        // MARK TOMBSTONE: Prevent re-attempting failed shader compilation every frame
+        it->second.creation_failed.store(true, std::memory_order_release);
         return false;
       }
       found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
     }
+
     const PipelineLayoutProvider* found_pipeline_layout =
         it->second.pipeline_layout.load(std::memory_order_acquire);
     last_pipeline_ = &*it;
@@ -1156,6 +1165,18 @@ bool VulkanPipelineCache::ConfigurePipeline(
       *pipeline_handle_out = &it->second;
     }
     return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
+  }
+
+  // --- 2. CACHE MISS (NEW PIPELINE) ---
+  auto [inserted_it, inserted] = pipelines_.emplace(description, Pipeline{});
+  PipelineCreationArguments creation_arguments;
+
+  if (!TryGetPipelineCreationArgumentsForDescription(description, &*inserted_it,
+                                                     creation_arguments) ||
+      !EnsurePipelineCreated(creation_arguments)) {
+    // MARK TOMBSTONE: Mark newly created map entry as failed
+    inserted_it->second.creation_failed.store(true, std::memory_order_release);
+    return false;
   }
 
   // Create the pipeline if not already existing.

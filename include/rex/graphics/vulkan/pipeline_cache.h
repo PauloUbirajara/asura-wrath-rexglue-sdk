@@ -244,6 +244,7 @@ class VulkanPipelineCache {
     Pipeline(const Pipeline& other)
         : pipeline(other.pipeline.load(std::memory_order_acquire)),
           pipeline_layout(other.pipeline_layout.load(std::memory_order_acquire)),
+          creation_failed(other.creation_failed.load(std::memory_order_acquire)),
           is_placeholder(other.is_placeholder.load(std::memory_order_acquire)) {}
     Pipeline& operator=(const Pipeline& other) {
       if (this == &other) {
@@ -254,8 +255,12 @@ class VulkanPipelineCache {
                             std::memory_order_release);
       is_placeholder.store(other.is_placeholder.load(std::memory_order_acquire),
                            std::memory_order_release);
+      creation_failed.store(other.creation_failed.load(std::memory_order_acquire),
+                                  std::memory_order_release);
       return *this;
     }
+
+    std::atomic<bool> creation_failed{false}; // Tombstone flag for failed pipelines
   };
 
   // Description that can be passed from the command processor thread to the

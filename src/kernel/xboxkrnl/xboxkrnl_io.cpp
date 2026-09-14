@@ -128,6 +128,31 @@ u32 NtCreateFile_entry(mapped_u32 handle_out, u32 desired_access,
       target_path, (uint32_t)desired_access, (uint32_t)file_attributes, (uint32_t)share_access,
       (uint32_t)creation_disposition, (uint32_t)create_options);
 
+  // --- BEGIN PATH SANITIZATION PATCH ---
+  // Reject paths that attempt to open non-existent empty filenames (e.g. Movies\.bik)
+  if (target_path.ends_with("\\.bik") || target_path.ends_with("/.bik")) {
+    if (io_status_block) {
+      io_status_block->status = X_STATUS_OBJECT_NAME_NOT_FOUND;
+      io_status_block->information = 0;
+    }
+    *handle_out = X_INVALID_HANDLE_VALUE;
+    REXKRNL_IMPORT_FAIL("NtCreateFile", "Ignored malformed bik path='{}' -> {:#x}", target_path,
+                        X_STATUS_OBJECT_NAME_NOT_FOUND);
+    return X_STATUS_OBJECT_NAME_NOT_FOUND;
+  }
+
+  if (target_path.ends_with("\\") || target_path.ends_with("/")) {
+    if (create_options & CreateOptions::FILE_NON_DIRECTORY_FILE) {
+      if (io_status_block) {
+        io_status_block->status = X_STATUS_FILE_IS_A_DIRECTORY;
+        io_status_block->information = 0;
+      }
+      *handle_out = X_INVALID_HANDLE_VALUE;
+      return X_STATUS_FILE_IS_A_DIRECTORY;
+    }
+  }
+  // --- END PATH SANITIZATION PATCH ---
+
   // Enforce that the path is ASCII.
   if (!IsValidPath(target_path, false)) {
     return X_STATUS_OBJECT_NAME_INVALID;

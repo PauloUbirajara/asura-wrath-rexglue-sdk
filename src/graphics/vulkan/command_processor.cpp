@@ -3607,7 +3607,7 @@ bool VulkanCommandProcessor::IssueDraw(xenos::PrimitiveType prim_type, uint32_t 
         uint32_t(regs.Get<reg::VGT_OUTPUT_PATH_CNTL>().path_select),
         uint32_t(regs.Get<reg::VGT_HOS_CNTL>().tess_mode),
         uint32_t(regs.Get<reg::RB_MODECONTROL>().edram_mode));
-    return false;
+    return true;
   };
 
   xenos::EdramMode edram_mode = regs.Get<reg::RB_MODECONTROL>().edram_mode;
