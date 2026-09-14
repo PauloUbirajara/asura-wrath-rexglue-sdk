@@ -20,6 +20,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <shared_mutex>
 #include <queue>
 #include <set>
 #include <thread>
@@ -427,6 +428,7 @@ class VulkanPipelineCache {
   VkShaderModule depth_float24_round_fragment_shader_ = VK_NULL_HANDLE;
 
   std::unordered_map<PipelineDescription, Pipeline, PipelineDescription::Hasher> pipelines_;
+    mutable std::shared_mutex pipelines_mutex_;
 
   // Previously used pipeline, to avoid lookups if the state wasn't changed.
   const std::pair<const PipelineDescription, Pipeline>* last_pipeline_ = nullptr;

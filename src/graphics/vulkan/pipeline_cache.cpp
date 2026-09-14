@@ -1108,6 +1108,7 @@ bool VulkanPipelineCache::ConfigurePipeline(
         uint32_t(primitive_processing_result.host_primitive_reset_enabled), render_pass_key.key);
     return false;
   }
+
   if (last_pipeline_ && last_pipeline_->first == description) {
     VkPipeline last_pipeline = last_pipeline_->second.pipeline.load(std::memory_order_acquire);
     const PipelineLayoutProvider* last_pipeline_layout =
@@ -1122,6 +1123,49 @@ bool VulkanPipelineCache::ConfigurePipeline(
     }
   }
 
+  std::pair<const PipelineDescription, Pipeline>* pipeline_entry = nullptr;
+
+  // --- 1. CONCURRENT CACHE LOOKUP (READ LOCK) ---
+  {
+    std::shared_lock<std::shared_mutex> read_lock(pipelines_mutex_);
+    auto it = pipelines_.find(description);
+    if (it != pipelines_.end()) {
+      pipeline_entry = const_cast<std::pair<const PipelineDescription, Pipeline>*>(&(*it));
+    }
+  }
+
+  // --- 2. CACHE MISS INSERTION (WRITE LOCK) ---
+  if (!pipeline_entry) {
+    std::unique_lock<std::shared_mutex> write_lock(pipelines_mutex_);
+    // Double-checked locking in case another thread inserted it concurrently
+    auto it = pipelines_.find(description);
+    if (it != pipelines_.end()) {
+      pipeline_entry = const_cast<std::pair<const PipelineDescription, Pipeline>*>(&(*it));
+    } else {
+      auto [inserted_it, inserted] = pipelines_.emplace(description, Pipeline{});
+      pipeline_entry = &(*inserted_it);
+    }
+  }
+
+  // Unlock pipelines_mutex_! pipeline_entry pointer is stable in std::unordered_map.
+  last_pipeline_ = pipeline_entry;
+
+  // Fast-fail: if previously marked as failed, abort immediately
+  if (pipeline_entry->second.creation_failed.load(std::memory_order_acquire)) {
+    return false;
+  }
+
+  VkPipeline found_pipeline = pipeline_entry->second.pipeline.load(std::memory_order_acquire);
+  if (found_pipeline != VK_NULL_HANDLE) {
+    pipeline_out = found_pipeline;
+    pipeline_layout_out = pipeline_entry->second.pipeline_layout.load(std::memory_order_acquire);
+    if (pipeline_handle_out) {
+      *pipeline_handle_out = &pipeline_entry->second;
+    }
+    return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
+  }
+
+  // --- 3. PIPELINE CREATION ---
   bool use_async = REXCVAR_GET(async_shader_compilation) && !creation_threads_.empty() &&
                    pixel_shader && placeholder_pixel_shader_ != VK_NULL_HANDLE;
   uint8_t async_priority = pipeline_util::kPriorityLowest;
@@ -1136,55 +1180,10 @@ bool VulkanPipelineCache::ConfigurePipeline(
         bound_rts, shader_writes_color_targets, shader_writes_depth);
   }
 
-  // --- 1. CACHE HIT ---
-  auto it = pipelines_.find(description);
-  if (it != pipelines_.end()) {
-    // Fast-fail: if previously marked as failed, abort immediately
-    if (it->second.creation_failed.load(std::memory_order_acquire)) {
-      return false;
-    }
-
-    VkPipeline found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
-    if (found_pipeline == VK_NULL_HANDLE) {
-      PipelineCreationArguments creation_arguments;
-      if (!TryGetPipelineCreationArgumentsForDescription(description, &*it, creation_arguments) ||
-          !EnsurePipelineCreated(creation_arguments)) {
-        // MARK TOMBSTONE: Prevent re-attempting failed shader compilation every frame
-        it->second.creation_failed.store(true, std::memory_order_release);
-        return false;
-      }
-      found_pipeline = it->second.pipeline.load(std::memory_order_acquire);
-    }
-
-    const PipelineLayoutProvider* found_pipeline_layout =
-        it->second.pipeline_layout.load(std::memory_order_acquire);
-    last_pipeline_ = &*it;
-    pipeline_out = found_pipeline;
-    pipeline_layout_out = found_pipeline_layout;
-    if (pipeline_handle_out) {
-      *pipeline_handle_out = &it->second;
-    }
-    return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
-  }
-
-  // --- 2. CACHE MISS (NEW PIPELINE) ---
-  auto [inserted_it, inserted] = pipelines_.emplace(description, Pipeline{});
-  PipelineCreationArguments creation_arguments;
-
-  if (!TryGetPipelineCreationArgumentsForDescription(description, &*inserted_it,
-                                                     creation_arguments) ||
-      !EnsurePipelineCreated(creation_arguments)) {
-    // MARK TOMBSTONE: Mark newly created map entry as failed
-    inserted_it->second.creation_failed.store(true, std::memory_order_release);
-    return false;
-  }
-
-  // Create the pipeline if not already existing.
-  auto& pipeline = *pipelines_.emplace(description, Pipeline()).first;
   PipelineCreationArguments creation_arguments_real;
-  if (!TryGetPipelineCreationArgumentsForDescription(description, &pipeline,
+  if (!TryGetPipelineCreationArgumentsForDescription(description, pipeline_entry,
                                                      creation_arguments_real)) {
-    pipelines_.erase(description);
+    pipeline_entry->second.creation_failed.store(true, std::memory_order_release);
     return false;
   }
 
@@ -1192,9 +1191,9 @@ bool VulkanPipelineCache::ConfigurePipeline(
   if (use_async) {
     creation_arguments_real.priority = async_priority;
     PipelineCreationArguments creation_arguments_placeholder;
-    if (TryGetPipelineCreationArgumentsForDescription(description, &pipeline,
+    if (TryGetPipelineCreationArgumentsForDescription(description, pipeline_entry,
                                                       creation_arguments_placeholder, true)) {
-      pipeline.second.is_placeholder.store(true, std::memory_order_release);
+      pipeline_entry->second.is_placeholder.store(true, std::memory_order_release);
       if (EnsurePipelineCreated(creation_arguments_placeholder, placeholder_pixel_shader_)) {
         {
           std::lock_guard<std::mutex> lock(creation_request_lock_);
@@ -1203,17 +1202,17 @@ bool VulkanPipelineCache::ConfigurePipeline(
         creation_request_cond_.notify_one();
         queued_async_creation = true;
       } else {
-        pipeline.second.is_placeholder.store(false, std::memory_order_release);
+        pipeline_entry->second.is_placeholder.store(false, std::memory_order_release);
       }
     }
   }
 
   if (!queued_async_creation && !EnsurePipelineCreated(creation_arguments_real)) {
-    pipelines_.erase(description);
+    pipeline_entry->second.creation_failed.store(true, std::memory_order_release);
     return false;
   }
   if (!queued_async_creation) {
-    pipeline.second.is_placeholder.store(false, std::memory_order_release);
+    pipeline_entry->second.is_placeholder.store(false, std::memory_order_release);
   }
 
   if (pipeline_storage_file_) {
@@ -1228,11 +1227,11 @@ bool VulkanPipelineCache::ConfigurePipeline(
     }
     storage_write_request_cond_.notify_all();
   }
-  last_pipeline_ = &pipeline;
-  pipeline_out = pipeline.second.pipeline.load(std::memory_order_acquire);
-  pipeline_layout_out = pipeline.second.pipeline_layout.load(std::memory_order_acquire);
+
+  pipeline_out = pipeline_entry->second.pipeline.load(std::memory_order_acquire);
+  pipeline_layout_out = pipeline_entry->second.pipeline_layout.load(std::memory_order_acquire);
   if (pipeline_handle_out) {
-    *pipeline_handle_out = &pipeline.second;
+    *pipeline_handle_out = &pipeline_entry->second;
   }
   return pipeline_out != VK_NULL_HANDLE && pipeline_layout_out != nullptr;
 }
@@ -3051,10 +3050,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
     }
   }
 
-  // This function preferably should validate the description to prevent
-  // unsupported behavior that may be dangerous/crashing because pipelines can
-  // be created from the disk storage.
-
   if (creation_arguments.pixel_shader) {
     REXGPU_INFO("Creating graphics pipeline state with VS {:016X}, PS {:016X}",
                 creation_arguments.vertex_shader->shader().ucode_data_hash(),
@@ -3223,8 +3218,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
       input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
       break;
     case PipelinePrimitiveTopology::kTriangleFan:
-      // Keep parity with D3D12 by requiring triangle fan to list conversion in
-      // PrimitiveProcessor rather than emitting native fan pipelines.
       assert_always();
       return false;
     case PipelinePrimitiveTopology::kLineListWithAdjacency:
@@ -3283,16 +3276,10 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   }
   rasterization_state.frontFace =
       description.front_face_clockwise ? VK_FRONT_FACE_CLOCKWISE : VK_FRONT_FACE_COUNTER_CLOCKWISE;
-  // Depth bias is dynamic (even toggling - pipeline creation is expensive).
-  // "If no depth attachment is present, r is undefined" in the depth bias
-  // formula, though Z has no effect on anything if a depth attachment is not
-  // used (the guest shader can't access Z), enabling only when there's a
-  // depth / stencil attachment for correctness.
   rasterization_state.depthBiasEnable =
       (!edram_fragment_shader_interlock && (description.render_pass_key.depth_and_color_used & 0b1))
           ? VK_TRUE
           : VK_FALSE;
-  // TODO(Triang3l): Wide lines.
   rasterization_state.lineWidth = 1.0f;
 
   bool subpass_has_attachments =
@@ -3301,20 +3288,12 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   VkPipelineMultisampleStateCreateInfo multisample_state = {};
   multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
   if (description.rasterizer_discard) {
-    // Keep rasterizer-discard pipelines independent from guest MSAA state, as
-    // done by D3D12 when rasterization is disabled.
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   } else if (!edram_fragment_shader_interlock && !subpass_has_attachments) {
-    // Keep parity with D3D12 host-render-target path, where draws without
-    // color/depth attachments must run at 1x sample count.
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
   } else if (description.render_pass_key.msaa_samples == xenos::MsaaSamples::k2X &&
              !render_target_cache_.IsMsaa2xSupported(subpass_has_attachments)) {
-    // Using sample 0 as 0 and 3 as 1 for 2x instead (not exactly the same
-    // sample locations, but still top-left and bottom-right - however, this can
-    // be adjusted with custom sample locations).
     multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_4_BIT;
-    // Keep parity with D3D12 ROV: sample masks are ignored without attachments.
     if (subpass_has_attachments) {
       sample_mask = 0b1001;
       multisample_state.pSampleMask = &sample_mask;
@@ -3384,7 +3363,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
           VK_BLEND_FACTOR_ONE_MINUS_CONSTANT_ALPHA,
           VK_BLEND_FACTOR_SRC_ALPHA_SATURATE,
       };
-      // 8 entries for safety since 3 bits from the guest are passed directly.
       static const VkBlendOp kBlendOpMap[] = {VK_BLEND_OP_ADD,
                                               VK_BLEND_OP_SUBTRACT,
                                               VK_BLEND_OP_MIN,
@@ -3433,10 +3411,7 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   dynamic_state.flags = 0;
   dynamic_state.dynamicStateCount = 0;
   dynamic_state.pDynamicStates = dynamic_states.data();
-  // Regardless of whether some of this state actually has any effect on the
-  // pipeline, marking all as dynamic because otherwise, binding any pipeline
-  // with such state not marked as dynamic will cause the dynamic state to be
-  // invalidated (again, even if it has no effect).
+
   dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_VIEWPORT;
   dynamic_states[dynamic_state.dynamicStateCount++] = VK_DYNAMIC_STATE_SCISSOR;
   if (!edram_fragment_shader_interlock) {
@@ -3529,12 +3504,17 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
         uint32_t(use_dynamic_rendering));
     return false;
   }
+
   bool was_placeholder =
       creation_arguments.pipeline->second.is_placeholder.load(std::memory_order_acquire);
-  VkPipeline old_pipeline =
-      creation_arguments.pipeline->second.pipeline.exchange(pipeline, std::memory_order_acq_rel);
+
+  // Store layout FIRST so readers loading pipeline won't see a valid pipeline with null layout.
   creation_arguments.pipeline->second.pipeline_layout.store(creation_arguments.pipeline_layout,
                                                             std::memory_order_release);
+
+  VkPipeline old_pipeline =
+      creation_arguments.pipeline->second.pipeline.exchange(pipeline, std::memory_order_acq_rel);
+
   if (creating_placeholder) {
     creation_arguments.pipeline->second.is_placeholder.store(true, std::memory_order_release);
   } else {
@@ -3577,11 +3557,12 @@ void VulkanPipelineCache::CreationThread(size_t thread_index) {
       VkPipeline pipeline =
           creation_arguments.pipeline->second.pipeline.load(std::memory_order_acquire);
       if (has_placeholder && pipeline != VK_NULL_HANDLE) {
-        // Keep the placeholder resident and stop waiting for a real pipeline.
+        // Keep placeholder resident permanently
         creation_arguments.pipeline->second.is_placeholder.store(false, std::memory_order_release);
       } else {
         creation_arguments.pipeline->second.pipeline.store(VK_NULL_HANDLE,
                                                            std::memory_order_release);
+        creation_arguments.pipeline->second.creation_failed.store(true, std::memory_order_release);
       }
     }
 
