@@ -3036,7 +3036,6 @@ bool VulkanPipelineCache::TryGetPipelineCreationArgumentsForDescription(
   creation_arguments.render_pass = render_pass;
   return true;
 }
-
 bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments& creation_arguments,
                                                 VkShaderModule fragment_shader_override) {
   VkPipeline existing_pipeline =
@@ -3710,6 +3709,22 @@ void VulkanPipelineCache::StorageWriteThread() {
       fwrite(&pipeline_description, sizeof(pipeline_description), 1, pipeline_storage_file_);
     }
   }
+}
+
+void VulkanPipelineCache::EnqueueShaderWrite(const Shader* shader) {
+  if (!shader) {
+    return;
+  }
+  std::lock_guard<std::mutex> lock(storage_write_request_lock_);
+  storage_write_shader_queue_.push_back(shader);
+  storage_write_request_cond_.notify_one();
+}
+
+void VulkanPipelineCache::EnqueuePipelineFlush() {
+  std::lock_guard<std::mutex> lock(storage_write_request_lock_);
+  storage_write_flush_shaders_ = true;
+  storage_write_flush_pipelines_ = true;
+  storage_write_request_cond_.notify_one();
 }
 
 }  // namespace rex::graphics::vulkan

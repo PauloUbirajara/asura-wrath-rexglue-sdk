@@ -99,6 +99,9 @@ class VulkanPipelineCache {
                                     const PipelineLayoutProvider*& pipeline_layout_out,
                                     bool* is_placeholder_out = nullptr) const;
 
+  void EnqueueShaderWrite(const Shader* shader);
+  void EnqueuePipelineFlush();
+
  private:
   REXPACKEDSTRUCT(ShaderStoredHeader, {
     uint64_t ucode_data_hash;
@@ -257,11 +260,11 @@ class VulkanPipelineCache {
       is_placeholder.store(other.is_placeholder.load(std::memory_order_acquire),
                            std::memory_order_release);
       creation_failed.store(other.creation_failed.load(std::memory_order_acquire),
-                                  std::memory_order_release);
+                            std::memory_order_release);
       return *this;
     }
 
-    std::atomic<bool> creation_failed{false}; // Tombstone flag for failed pipelines
+    std::atomic<bool> creation_failed{false};  // Tombstone flag for failed pipelines
   };
 
   // Description that can be passed from the command processor thread to the
@@ -377,6 +380,21 @@ class VulkanPipelineCache {
   void CreateQueuedPipelinesOnProcessorThread();
   void ProcessDeferredPipelineDestructions(bool force_all);
 
+  REXPACKEDSTRUCT(PipelineStorageHeader, {
+    static constexpr uint32_t kMagic = 0x58454E4F;  // 'XENO'
+    static constexpr uint32_t kVersion = 1;
+
+    uint32_t magic;
+    uint32_t version;
+    uint8_t pipeline_cache_uuid[VK_UUID_SIZE];
+    uint32_t vendor_id;
+    uint32_t device_id;
+    uint64_t shader_count;
+    uint64_t pipeline_count;
+  });
+
+  bool ValidateDriverCacheHeader(const PipelineStorageHeader& header);
+
   VulkanCommandProcessor& command_processor_;
   const RegisterFile& register_file_;
   VulkanRenderTargetCache& render_target_cache_;
@@ -428,7 +446,7 @@ class VulkanPipelineCache {
   VkShaderModule depth_float24_round_fragment_shader_ = VK_NULL_HANDLE;
 
   std::unordered_map<PipelineDescription, Pipeline, PipelineDescription::Hasher> pipelines_;
-    mutable std::shared_mutex pipelines_mutex_;
+  mutable std::shared_mutex pipelines_mutex_;
 
   // Previously used pipeline, to avoid lookups if the state wasn't changed.
   const std::pair<const PipelineDescription, Pipeline>* last_pipeline_ = nullptr;
