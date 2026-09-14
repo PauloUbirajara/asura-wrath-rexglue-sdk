@@ -34,45 +34,27 @@ class VulkanRenderTargetCache final : public RenderTargetCache {
  public:
   union RenderPassKey {
     struct {
-      // If emulating 2x as 4x, this is still 2x for simplicity of using this
-      // field to make guest-related decisions. Render pass objects are not very
-      // expensive, and their dependencies can't be shared between 2x-as-4x and
-      // true 4x MSAA passes (framebuffers because render target cache render
-      // targets are different for 2x and 4x guest MSAA, pipelines because the
-      // sample mask will have 2 samples excluded for 2x-as-4x).
-      // This has effect only on the attachments, but even in cases when there
-      // are no attachments, it can be used to pass the sample count between
-      // subsystems, for instance, to specify the desired number of samples to
-      // use when there are no attachments in pipelines.
-      // Also, without attachments, using separate render passes for different
-      // sample counts ensures that if the variableMultisampleRate feature is
-      // not supported, no draws with different rasterization sample counts end
-      // up in one render pass.
-      xenos::MsaaSamples msaa_samples : xenos::kMsaaSamplesBits;  // 2
-      // << 0 is depth, << 1...4 is color.
-      uint32_t depth_and_color_used : 1 + xenos::kMaxColorRenderTargets;  // 7
-      // 0 for unused attachments.
-      // If VK_FORMAT_D24_UNORM_S8_UINT is not supported, this must be kD24FS8
-      // even for kD24S8.
-      xenos::DepthRenderTargetFormat depth_format : xenos::kDepthRenderTargetFormatBits;  // 8
-      // Linear or sRGB included if host sRGB is used.
-      xenos::ColorRenderTargetFormat color_0_view_format
-          : xenos::kColorRenderTargetFormatBits;  // 12
-      xenos::ColorRenderTargetFormat color_1_view_format
-          : xenos::kColorRenderTargetFormatBits;  // 16
-      xenos::ColorRenderTargetFormat color_2_view_format
-          : xenos::kColorRenderTargetFormatBits;  // 20
-      xenos::ColorRenderTargetFormat color_3_view_format
-          : xenos::kColorRenderTargetFormatBits;    // 24
-      uint32_t color_rts_use_transfer_formats : 1;  // 25
+      xenos::MsaaSamples msaa_samples : xenos::kMsaaSamplesBits;          // 2 bits
+      uint32_t depth_and_color_used : 1 + xenos::kMaxColorRenderTargets;  // 5 bits
+      xenos::DepthRenderTargetFormat depth_format : xenos::kDepthRenderTargetFormatBits;
+      xenos::ColorRenderTargetFormat color_0_view_format : xenos::kColorRenderTargetFormatBits;
+      xenos::ColorRenderTargetFormat color_1_view_format : xenos::kColorRenderTargetFormatBits;
+      xenos::ColorRenderTargetFormat color_2_view_format : xenos::kColorRenderTargetFormatBits;
+      xenos::ColorRenderTargetFormat color_3_view_format : xenos::kColorRenderTargetFormatBits;
+      uint32_t color_rts_use_transfer_formats : 1;  // 1 bit
     };
     uint32_t key = 0;
+
     struct Hasher {
-      size_t operator()(const RenderPassKey& key) const { return std::hash<uint32_t>{}(key.key); }
+      // Identity hash avoids std::hash bit-mixing overhead on a 25-bit bitfield
+      size_t operator()(const RenderPassKey& pass_key) const noexcept {
+        return static_cast<size_t>(pass_key.key);
+      }
     };
-    bool operator==(const RenderPassKey& other_key) const { return key == other_key.key; }
-    bool operator!=(const RenderPassKey& other_key) const { return !(*this == other_key); }
-    bool operator<(const RenderPassKey& other_key) const { return key < other_key.key; }
+
+    bool operator==(const RenderPassKey& other_key) const noexcept { return key == other_key.key; }
+    bool operator!=(const RenderPassKey& other_key) const noexcept { return key != other_key.key; }
+    bool operator<(const RenderPassKey& other_key) const noexcept { return key < other_key.key; }
   };
   static_assert_size(RenderPassKey, sizeof(uint32_t));
 
