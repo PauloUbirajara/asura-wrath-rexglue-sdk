@@ -166,46 +166,44 @@ class VulkanPipelineCache {
   });
 
   REXPACKEDSTRUCT(PipelineDescription, {
+    uint64_t cached_hash;  // Pre-calculated hash stored upon creation
     uint64_t vertex_shader_hash;
     uint64_t vertex_shader_modification;
-    // 0 if no pixel shader.
     uint64_t pixel_shader_hash;
     uint64_t pixel_shader_modification;
     VulkanRenderTargetCache::RenderPassKey render_pass_key;
 
-    // Shader stages.
-    PipelineGeometryShader geometry_shader : 2;  // 2
-    // Input assembly.
-    PipelinePrimitiveTopology primitive_topology : 3;  // 5
-    uint32_t primitive_restart : 1;                    // 6
-    xenos::TessellationMode tessellation_mode : 2;     // 8
-    // Rasterization.
-    uint32_t depth_clamp_enable : 1;       // 9
-    PipelinePolygonMode polygon_mode : 2;  // 11
-    uint32_t cull_front : 1;               // 12
-    uint32_t cull_back : 1;                // 13
-    uint32_t front_face_clockwise : 1;     // 14
-    uint32_t rasterizer_discard : 1;       // 15
-    // Depth / stencil.
-    uint32_t depth_write_enable : 1;                      // 16
-    xenos::CompareFunction depth_compare_op : 3;          // 19
-    uint32_t stencil_test_enable : 1;                     // 20
-    xenos::StencilOp stencil_front_fail_op : 3;           // 23
-    xenos::StencilOp stencil_front_pass_op : 3;           // 26
-    xenos::StencilOp stencil_front_depth_fail_op : 3;     // 29
-    xenos::CompareFunction stencil_front_compare_op : 3;  // 32
-    xenos::StencilOp stencil_back_fail_op : 3;            // 35
+    // Shader stages & Input assembly...
+    PipelineGeometryShader geometry_shader : 2;
+    PipelinePrimitiveTopology primitive_topology : 3;
+    uint32_t primitive_restart : 1;
+    xenos::TessellationMode tessellation_mode : 2;
+    uint32_t depth_clamp_enable : 1;
+    PipelinePolygonMode polygon_mode : 2;
+    uint32_t cull_front : 1;
+    uint32_t cull_back : 1;
+    uint32_t front_face_clockwise : 1;
+    uint32_t rasterizer_discard : 1;
 
-    xenos::StencilOp stencil_back_pass_op : 3;           // 3
-    xenos::StencilOp stencil_back_depth_fail_op : 3;     // 6
-    xenos::CompareFunction stencil_back_compare_op : 3;  // 9
-    uint32_t sample_rate_shading : 1;                    // 10
+    // Depth / stencil...
+    uint32_t depth_write_enable : 1;
+    xenos::CompareFunction depth_compare_op : 3;
+    uint32_t stencil_test_enable : 1;
+    xenos::StencilOp stencil_front_fail_op : 3;
+    xenos::StencilOp stencil_front_pass_op : 3;
+    xenos::StencilOp stencil_front_depth_fail_op : 3;
+    xenos::CompareFunction stencil_front_compare_op : 3;
+    xenos::StencilOp stencil_back_fail_op : 3;
 
-    // Filled only for the attachments present in the render pass object.
+    xenos::StencilOp stencil_back_pass_op : 3;
+    xenos::StencilOp stencil_back_depth_fail_op : 3;
+    xenos::CompareFunction stencil_back_compare_op : 3;
+    uint32_t sample_rate_shading : 1;
+
     PipelineRenderTarget render_targets[xenos::kMaxColorRenderTargets];
 
-    // Including all the padding, for a stable hash.
     static constexpr uint32_t kVersion = 0x20260228;
+
     PipelineDescription() {
       Reset();
     }
@@ -217,17 +215,30 @@ class VulkanPipelineCache {
       return *this;
     }
     bool operator==(const PipelineDescription& description) const {
+      // Fast-path 64-bit hash comparison before full memory compare
+      if (cached_hash != description.cached_hash) {
+        return false;
+      }
       return std::memcmp(this, &description, sizeof(*this)) == 0;
     }
     void Reset() {
       std::memset(this, 0, sizeof(*this));
     }
-    uint64_t GetHash() const {
-      return XXH3_64bits(this, sizeof(*this));
+
+    // Finalize description state and calculate static hash once
+    void FinalizeHash() {
+      cached_hash = 0;  // Exclude hash field itself during XXH3 calculation
+      cached_hash = XXH3_64bits(reinterpret_cast<const uint8_t*>(this) + sizeof(cached_hash),
+                                sizeof(*this) - sizeof(cached_hash));
     }
+
+    uint64_t GetHash() const {
+      return cached_hash;
+    }
+
     struct Hasher {
       size_t operator()(const PipelineDescription& description) const {
-        return size_t(description.GetHash());
+        return static_cast<size_t>(description.cached_hash);
       }
     };
   });
@@ -495,6 +506,25 @@ class VulkanPipelineCache {
   std::vector<std::unique_ptr<rex::thread::Thread>> creation_threads_;
 
   VkPipelineCache vulkan_pipeline_cache_ = VK_NULL_HANDLE;
+
+  struct PipelineInputStateKey {
+    const VulkanShader::VulkanTranslation* vertex_shader = nullptr;
+    const VulkanShader::VulkanTranslation* pixel_shader = nullptr;
+    PrimitiveProcessor::ProcessingResult primitive_result = {};
+    uint32_t depth_control = 0;
+    uint32_t color_mask = 0;
+    uint64_t render_pass_key = 0;
+    uint32_t pa_su_sc_mode_cntl = 0;
+    uint32_t pa_cl_clip_cntl = 0;
+    uint32_t rb_blendcontrol[4] = {};
+
+    bool operator==(const PipelineInputStateKey& other) const {
+      return std::memcmp(this, &other, sizeof(PipelineInputStateKey)) == 0;
+    }
+    bool operator!=(const PipelineInputStateKey& other) const { return !(*this == other); }
+  };
+
+  mutable PipelineInputStateKey last_input_state_key_ = {};
 };
 
 }  // namespace rex::graphics::vulkan

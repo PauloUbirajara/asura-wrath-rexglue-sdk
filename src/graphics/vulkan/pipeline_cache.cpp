@@ -391,6 +391,8 @@ bool VulkanPipelineCache::Initialize() {
     }
   }
 
+  pipelines_.reserve(2048);  // Pre-allocate bucket capacity to prevent rehashing during gameplay
+
   return true;
 }
 
@@ -832,6 +834,8 @@ void VulkanPipelineCache::Shutdown() {
 
   // Destroy all pipelines.
   last_pipeline_ = nullptr;
+  last_input_state_key_ = {};
+
   for (const auto& pipeline_pair : pipelines_) {
     VkPipeline pipeline = pipeline_pair.second.pipeline.load(std::memory_order_acquire);
     if (pipeline != VK_NULL_HANDLE) {
@@ -839,6 +843,9 @@ void VulkanPipelineCache::Shutdown() {
     }
   }
   pipelines_.clear();
+
+  // Restore capacity immediately so future inserts won't trigger rehashes
+  pipelines_.reserve(2048);
 
   // Destroy all internal shaders.
   ui::vulkan::util::DestroyAndNullHandle(dfn.vkDestroyShaderModule, device,
@@ -1066,10 +1073,45 @@ bool VulkanPipelineCache::ConfigurePipeline(
   SCOPE_profile_cpu_f("gpu");
 #endif  // XE_GPU_FINE_GRAINED_DRAW_SCOPES
 
-  // Ensure shaders are translated - needed now for GetCurrentStateDescription.
   if (!EnsureShadersTranslated(vertex_shader, pixel_shader)) {
     return false;
   }
+
+  // --- FAST PATH: STATE KEY VALIDATION ---
+  // Build lightweight input state key from scalar parameters and GPU registers
+  PipelineInputStateKey current_key;
+  current_key.vertex_shader = vertex_shader;
+  current_key.pixel_shader = pixel_shader;
+  current_key.primitive_result = primitive_processing_result;
+  current_key.depth_control = normalized_depth_control.value;
+  current_key.color_mask = normalized_color_mask;
+  current_key.render_pass_key = render_pass_key.key;
+  current_key.pa_su_sc_mode_cntl = register_file_.Get<reg::PA_SU_SC_MODE_CNTL>().value;
+  current_key.pa_cl_clip_cntl = register_file_.Get<reg::PA_CL_CLIP_CNTL>().value;
+  current_key.rb_blendcontrol[0] =
+      register_file_.Get<reg::RB_BLENDCONTROL>(reg::RB_BLENDCONTROL::rt_register_indices[0]).value;
+  current_key.rb_blendcontrol[1] =
+      register_file_.Get<reg::RB_BLENDCONTROL>(reg::RB_BLENDCONTROL::rt_register_indices[1]).value;
+  current_key.rb_blendcontrol[2] =
+      register_file_.Get<reg::RB_BLENDCONTROL>(reg::RB_BLENDCONTROL::rt_register_indices[2]).value;
+  current_key.rb_blendcontrol[3] =
+      register_file_.Get<reg::RB_BLENDCONTROL>(reg::RB_BLENDCONTROL::rt_register_indices[3]).value;
+
+  if (last_pipeline_ != nullptr && current_key == last_input_state_key_) {
+    VkPipeline last_pipeline = last_pipeline_->second.pipeline.load(std::memory_order_acquire);
+    const PipelineLayoutProvider* last_pipeline_layout =
+        last_pipeline_->second.pipeline_layout.load(std::memory_order_acquire);
+    if (last_pipeline != VK_NULL_HANDLE && last_pipeline_layout != nullptr) {
+      pipeline_out = last_pipeline;
+      pipeline_layout_out = last_pipeline_layout;
+      if (pipeline_handle_out) {
+        *pipeline_handle_out = const_cast<Pipeline*>(&last_pipeline_->second);
+      }
+      return true;
+    }
+  }
+
+  // Handle shader storage queue insertions on state change
   if (shader_storage_file_ &&
       vertex_shader->shader().ucode_storage_index() != shader_storage_index_) {
     vertex_shader->shader().set_ucode_storage_index(shader_storage_index_);
@@ -1093,6 +1135,7 @@ bool VulkanPipelineCache::ConfigurePipeline(
     storage_write_request_cond_.notify_all();
   }
 
+  // --- SLOW PATH: FULL STATE DESCRIPTION EVALUATION ---
   PipelineDescription description;
   if (!GetCurrentStateDescription(vertex_shader, pixel_shader, primitive_processing_result,
                                   normalized_depth_control, normalized_color_mask, render_pass_key,
@@ -1109,20 +1152,6 @@ bool VulkanPipelineCache::ConfigurePipeline(
     return false;
   }
 
-  if (last_pipeline_ && last_pipeline_->first == description) {
-    VkPipeline last_pipeline = last_pipeline_->second.pipeline.load(std::memory_order_acquire);
-    const PipelineLayoutProvider* last_pipeline_layout =
-        last_pipeline_->second.pipeline_layout.load(std::memory_order_acquire);
-    if (last_pipeline != VK_NULL_HANDLE && last_pipeline_layout != nullptr) {
-      pipeline_out = last_pipeline;
-      pipeline_layout_out = last_pipeline_layout;
-      if (pipeline_handle_out) {
-        *pipeline_handle_out = const_cast<Pipeline*>(&last_pipeline_->second);
-      }
-      return true;
-    }
-  }
-
   std::pair<const PipelineDescription, Pipeline>* pipeline_entry = nullptr;
 
   // --- 1. CONCURRENT CACHE LOOKUP (READ LOCK) ---
@@ -1137,7 +1166,6 @@ bool VulkanPipelineCache::ConfigurePipeline(
   // --- 2. CACHE MISS INSERTION (WRITE LOCK) ---
   if (!pipeline_entry) {
     std::unique_lock<std::shared_mutex> write_lock(pipelines_mutex_);
-    // Double-checked locking in case another thread inserted it concurrently
     auto it = pipelines_.find(description);
     if (it != pipelines_.end()) {
       pipeline_entry = const_cast<std::pair<const PipelineDescription, Pipeline>*>(&(*it));
@@ -1147,10 +1175,9 @@ bool VulkanPipelineCache::ConfigurePipeline(
     }
   }
 
-  // Unlock pipelines_mutex_! pipeline_entry pointer is stable in std::unordered_map.
   last_pipeline_ = pipeline_entry;
+  last_input_state_key_ = current_key;
 
-  // Fast-fail: if previously marked as failed, abort immediately
   if (pipeline_entry->second.creation_failed.load(std::memory_order_acquire)) {
     return false;
   }
@@ -1190,9 +1217,19 @@ bool VulkanPipelineCache::ConfigurePipeline(
   bool queued_async_creation = false;
   if (use_async) {
     creation_arguments_real.priority = async_priority;
-    PipelineCreationArguments creation_arguments_placeholder;
-    if (TryGetPipelineCreationArgumentsForDescription(description, pipeline_entry,
-                                                      creation_arguments_placeholder, true)) {
+
+    PipelineCreationArguments creation_arguments_placeholder = creation_arguments_real;
+    creation_arguments_placeholder.pixel_shader = nullptr;
+    creation_arguments_placeholder.pipeline_layout = command_processor_.GetPipelineLayout(
+        0, 0,
+        static_cast<const VulkanShader&>(creation_arguments_real.vertex_shader->shader())
+            .GetTextureBindingsAfterTranslation()
+            .size(),
+        static_cast<const VulkanShader&>(creation_arguments_real.vertex_shader->shader())
+            .GetSamplerBindingsAfterTranslation()
+            .size());
+
+    if (creation_arguments_placeholder.pipeline_layout != nullptr) {
       pipeline_entry->second.is_placeholder.store(true, std::memory_order_release);
       if (EnsurePipelineCreated(creation_arguments_placeholder, placeholder_pixel_shader_)) {
         {
@@ -1596,6 +1633,8 @@ bool VulkanPipelineCache::GetCurrentStateDescription(
     }
   }
 
+  // Compute final hash once after all fields are populated
+  description_out.FinalizeHash();
   return true;
 }
 
@@ -3049,15 +3088,6 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
     }
   }
 
-  if (creation_arguments.pixel_shader) {
-    REXGPU_INFO("Creating graphics pipeline state with VS {:016X}, PS {:016X}",
-                creation_arguments.vertex_shader->shader().ucode_data_hash(),
-                creation_arguments.pixel_shader->shader().ucode_data_hash());
-  } else {
-    REXGPU_INFO("Creating graphics pipeline state with VS {:016X}",
-                creation_arguments.vertex_shader->shader().ucode_data_hash());
-  }
-
   const PipelineDescription& description = creation_arguments.pipeline->first;
   if (!ArePipelineRequirementsMet(description)) {
     assert_always(
@@ -3065,6 +3095,15 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
         "unsupported features, and when loading the pipeline storage, "
         "pipelines with unsupported features must be filtered out");
     return false;
+  }
+
+  if (creation_arguments.pixel_shader) {
+    REXGPU_INFO("Creating graphics pipeline state with VS {:016X}, PS {:016X}",
+                creation_arguments.vertex_shader->shader().ucode_data_hash(),
+                creation_arguments.pixel_shader->shader().ucode_data_hash());
+  } else {
+    REXGPU_INFO("Creating graphics pipeline state with VS {:016X}",
+                creation_arguments.vertex_shader->shader().ucode_data_hash());
   }
 
   const ui::vulkan::VulkanDevice* const vulkan_device = command_processor_.GetVulkanDevice();
@@ -3461,7 +3500,9 @@ bool VulkanPipelineCache::EnsurePipelineCreated(const PipelineCreationArguments&
   VkGraphicsPipelineCreateInfo pipeline_create_info;
   pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
   pipeline_create_info.pNext = use_dynamic_rendering ? &pipeline_rendering_create_info : nullptr;
-  pipeline_create_info.flags = 0;
+  // Skip heavy driver compiler optimizations for fast synchronous placeholder creation
+  pipeline_create_info.flags =
+      creating_placeholder ? VK_PIPELINE_CREATE_DISABLE_OPTIMIZATION_BIT : 0;
   pipeline_create_info.stageCount = shader_stage_count;
   pipeline_create_info.pStages = shader_stages.data();
   pipeline_create_info.pVertexInputState = &vertex_input_state;
