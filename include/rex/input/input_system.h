@@ -14,6 +14,7 @@
 #include <atomic>
 #include <bitset>
 #include <memory>
+#include <mutex>
 #include <utility>
 #include <vector>
 
@@ -76,6 +77,8 @@ class InputSystem : public system::IInputSystem {
   /// The device that speaks for a user, preferring the one most recently in
   /// the player's hands.
   DeviceId ChooseDeviceForUser(uint32_t user_index) const;
+  /// GetStateForUI body; the caller holds mutex_.
+  X_RESULT GetStateLocked(uint32_t user_index, X_INPUT_STATE* out_state);
 
   void UpdateConnectedUser(uint32_t user_index, bool connected);
   void AdjustDeadzoneLevels(uint32_t user_index, X_INPUT_GAMEPAD* gamepad) const;
@@ -101,6 +104,11 @@ class InputSystem : public system::IInputSystem {
   std::atomic<int> ui_input_blockers_{0};
   // Masked out per user until the guest sees them released.
   std::array<uint16_t, kMaxGuestUsers> consumed_buttons_ = {};
+
+  // Guest threads poll XamInputGet* concurrently, and every entry point
+  // re-enumerates and rebuilds devices_, so the public entry points that touch
+  // device or per-user state are serialized.
+  std::mutex mutex_;
 };
 
 /// Create a default InputSystem with SDL + MnK + NOP drivers.
