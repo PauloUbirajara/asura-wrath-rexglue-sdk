@@ -25,6 +25,11 @@ namespace vulkan {
 class VulkanInstance {
  public:
   static std::unique_ptr<VulkanInstance> Create(bool with_surface, bool try_enable_validation);
+  // Use these entry points instead of loading the system Vulkan loader, for
+  // every instance created afterwards (e.g. a loader opened with a custom
+  // driver on Android). Both must be set; nullptr restores the default.
+  static void SetLoaderOverride(PFN_vkGetInstanceProcAddr get_instance_proc_addr,
+                                PFN_vkDestroyInstance destroy_instance);
 
   VulkanInstance(const VulkanInstance&) = delete;
   VulkanInstance& operator=(const VulkanInstance&) = delete;

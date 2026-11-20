@@ -31,6 +31,18 @@ namespace rex {
 namespace ui {
 namespace vulkan {
 
+namespace {
+PFN_vkGetInstanceProcAddr loader_override_get_instance_proc_addr = nullptr;
+PFN_vkDestroyInstance loader_override_destroy_instance = nullptr;
+}  // namespace
+
+void VulkanInstance::SetLoaderOverride(PFN_vkGetInstanceProcAddr get_instance_proc_addr,
+                                       PFN_vkDestroyInstance destroy_instance) {
+  const bool both = get_instance_proc_addr && destroy_instance;
+  loader_override_get_instance_proc_addr = both ? get_instance_proc_addr : nullptr;
+  loader_override_destroy_instance = both ? destroy_instance : nullptr;
+}
+
 std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
                                                        const bool try_enable_validation) {
   std::unique_ptr<VulkanInstance> vulkan_instance(new VulkanInstance());
@@ -45,7 +57,13 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
 
   bool functions_loaded = true;
   bool loader_loaded = false;
+  if (loader_override_get_instance_proc_addr) {
+    ifn.vkGetInstanceProcAddr = loader_override_get_instance_proc_addr;
+    ifn.vkDestroyInstance = loader_override_destroy_instance;
+    loader_loaded = true;
+  }
 #if REX_PLATFORM_MAC
+  if (!loader_loaded) {
   const MacOSVulkanRuntimePaths macos_runtime_paths = DetectMacOSVulkanRuntimePaths();
   ConfigureMacOSVulkanEnvironment(macos_runtime_paths);
 
@@ -74,18 +92,23 @@ std::unique_ptr<VulkanInstance> VulkanInstance::Create(const bool with_surface,
     }
     return nullptr;
   }
+  }
 #else
-  loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
   if (!loader_loaded) {
-    REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
-    return nullptr;
+    loader_loaded = vulkan_instance->loader_.Load(platform::lib_names::kVulkanLoader);
+    if (!loader_loaded) {
+      REXLOG_ERROR("Failed to load {}", platform::lib_names::kVulkanLoader);
+      return nullptr;
+    }
   }
 #endif
 
 #define XE_VULKAN_LOAD_LOADER_FUNCTION(name) \
   functions_loaded &= (ifn.name = vulkan_instance->loader_.GetSymbol<PFN_##name>(#name)) != nullptr;
-  XE_VULKAN_LOAD_LOADER_FUNCTION(vkGetInstanceProcAddr);
-  XE_VULKAN_LOAD_LOADER_FUNCTION(vkDestroyInstance);
+  if (!loader_override_get_instance_proc_addr) {
+    XE_VULKAN_LOAD_LOADER_FUNCTION(vkGetInstanceProcAddr);
+    XE_VULKAN_LOAD_LOADER_FUNCTION(vkDestroyInstance);
+  }
 #undef XE_VULKAN_LOAD_LOADER_FUNCTION
   if (!functions_loaded) {
     REXLOG_ERROR("Failed to get Vulkan loader function pointers");
