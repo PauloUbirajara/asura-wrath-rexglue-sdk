@@ -24,8 +24,8 @@ add_library(rexcore OBJECT
 )
 add_library(rex::core ALIAS rexcore)
 
-if(APPLE)
-    # Apple's libc++ still gates std::jthread/std::stop_token behind the
+if(APPLE OR ANDROID)
+    # Apple's (and the NDK's) libc++ still gates std::jthread/std::stop_token behind the
     # experimental-library feature flag. Only timer_queue.cpp uses them, and
     # neither type crosses a header boundary.
     set_source_files_properties(timer_queue.cpp PROPERTIES
@@ -74,6 +74,17 @@ elseif(UNIX)
         system_posix.cpp
         threading_posix.cpp
     )
+    if(ANDROID)
+        # Bionic has no ucontext switching: a stack switch per CPU instead.
+        if(CMAKE_ANDROID_ARCH_ABI STREQUAL "arm64-v8a")
+            set(REX_FIBER_ARCH_SOURCE fiber_android_arm64.cpp)
+        elseif(CMAKE_ANDROID_ARCH_ABI STREQUAL "x86_64")
+            set(REX_FIBER_ARCH_SOURCE fiber_android_x86_64.cpp)
+        else()
+            message(FATAL_ERROR "Android ABI ${CMAKE_ANDROID_ARCH_ABI} is not supported (64-bit only)")
+        endif()
+        target_sources(rexcore PRIVATE fiber_android.cpp ${REX_FIBER_ARCH_SOURCE} filesystem_android.cpp)
+    endif()
 endif()
 
 # Xenos data-format layer (stateless; headers under include/rex/graphics/).
@@ -100,6 +111,9 @@ target_include_directories(rexcore PRIVATE
 
 if(APPLE)
     target_link_libraries(rexcore PRIVATE pthread)
+elseif(ANDROID)
+    # pthread and rt are part of bionic's libc.
+    target_link_libraries(rexcore PRIVATE dl)
 elseif(UNIX)
     target_link_libraries(rexcore PRIVATE pthread rt dl)
 endif()

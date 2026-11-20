@@ -9,6 +9,9 @@
  * @modified    Tom Clay & Rien Gupta, 2026 - Adapted for ReXGlue runtime (POSIX + macOS)
  */
 
+#if defined(__ANDROID__)
+#include <dlfcn.h>  // dladdr: GetExecutablePath
+#endif
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -91,6 +94,15 @@ std::filesystem::path GetExecutablePath() {
   std::error_code ec;
   std::filesystem::path canonical_path = std::filesystem::weakly_canonical(executable_path, ec);
   return ec ? std::filesystem::path(executable_path) : canonical_path;
+#elif REX_PLATFORM_ANDROID
+  // /proc/self/exe is the zygote's app_process. The app is libraries in the
+  // APK's library folder: this library's path stands in for the executable,
+  // so GetExecutableFolder() is where the GPU plugins are.
+  Dl_info info{};
+  if (dladdr(reinterpret_cast<void*>(&GetExecutablePath), &info) && info.dli_fname) {
+    return std::filesystem::path(info.dli_fname);
+  }
+  return {};
 #else
   char buff[FILENAME_MAX] = "";
   readlink("/proc/self/exe", buff, FILENAME_MAX);

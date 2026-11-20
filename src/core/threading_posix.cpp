@@ -49,6 +49,14 @@ static_assert(REX_PLATFORM_LINUX || REX_PLATFORM_MAC, "This file is POSIX-only")
 #include <rex/string.h>
 #endif
 
+// Robust mutexes (recover a wait whose owner thread died): glibc has them,
+// Android's bionic doesn't.
+#if REX_PLATFORM_LINUX && !REX_PLATFORM_ANDROID
+#define REX_HAS_ROBUST_MUTEX 1
+#else
+#define REX_HAS_ROBUST_MUTEX 0
+#endif
+
 #if REX_PLATFORM_LINUX
 // SIGEV_THREAD_ID in timer_create(...) is a Linux extension
 #define REX_HAS_SIGEV_THREAD_ID 1
@@ -270,7 +278,7 @@ static sem_t* RexCreateAnonymousSemaphore() {
 class PosixConditionBase {
  public:
   PosixConditionBase() {
-#if REX_PLATFORM_LINUX
+#if REX_HAS_ROBUST_MUTEX
     // Use robust mutexes so waits can recover if owner thread terminates.
     pthread_mutexattr_t attr;
     if (pthread_mutexattr_init(&attr) == 0) {
@@ -290,7 +298,7 @@ class PosixConditionBase {
   WaitResult Wait(std::chrono::milliseconds timeout) {
     bool executed;
     auto predicate = [this] { return this->signaled(); };
-#if REX_PLATFORM_LINUX
+#if REX_HAS_ROBUST_MUTEX
     auto native_mutex = static_cast<pthread_mutex_t*>(mutex_.native_handle());
     int lock_result = pthread_mutex_lock(native_mutex);
     if (lock_result == EOWNERDEAD) {
@@ -344,7 +352,7 @@ class PosixConditionBase {
       locks.reserve(handles.size());
 
       for (size_t i = 0; i < handles.size(); ++i) {
-#if REX_PLATFORM_LINUX
+#if REX_HAS_ROBUST_MUTEX
         auto native_mutex = static_cast<pthread_mutex_t*>(handles[i]->mutex_.native_handle());
         int result = pthread_mutex_trylock(native_mutex);
         if (result == 0 || result == EOWNERDEAD) {
@@ -869,19 +877,15 @@ class PosixCondition<Thread> : public PosixConditionBase {
       return;
     }
 
-#if defined(__APPLE__)
+#if defined(__APPLE__) || REX_PLATFORM_ANDROID
     // macOS has no sigqueue/pthread_sigqueue; pthread_kill delivers the signal
-    // without the sigval payload.
+    // without the sigval payload (the handler doesn't use it). On Android,
+    // sigqueue takes a process id, so a thread id there could wake any thread.
     int result = pthread_kill(thread_, GetSystemSignal(SignalType::kThreadUserCallback));
 #else
     sigval value{};
     value.sival_ptr = this;
-#if REX_PLATFORM_ANDROID
-    int result = sigqueue(pthread_gettid_np(thread_),
-                          GetSystemSignal(SignalType::kThreadUserCallback), value);
-#else
     int result = pthread_sigqueue(thread_, GetSystemSignal(SignalType::kThreadUserCallback), value);
-#endif
 #endif
     if (result != 0) {
       REXSYS_WARN("QueueUserCallback: signal delivery failed ({})", result);

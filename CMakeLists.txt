@@ -163,7 +163,11 @@ if(WIN32)
     endif()
     add_compile_definitions(REX_PLATFORM_WINDOWS=1)
 elseif(UNIX AND NOT APPLE)
-    if(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
+    if(ANDROID)
+        # Its own output folder: android-x86_64 would otherwise land in (and
+        # overwrite) the host's linux-amd64, which holds the codegen tool.
+        set(REX_PLATFORM "android-${CMAKE_ANDROID_ARCH_ABI}")
+    elseif(REX_TARGET_PROCESSOR MATCHES "AMD64|x86_64")
         set(REX_PLATFORM "linux-amd64")
     elseif(REX_TARGET_PROCESSOR MATCHES "aarch64|ARM64|arm64")
         set(REX_PLATFORM "linux-arm64")

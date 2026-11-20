@@ -124,6 +124,14 @@ int WINAPI wWinMain(HINSTANCE hinstance, HINSTANCE hinstance_prev, LPWSTR comman
   return RunWindowedApp(static_cast<int>(argv_ptrs.size()), argv_ptrs.data());
 }
 
+#elif REX_PLATFORM_ANDROID
+
+// SDLActivity loads the app's library and calls SDL_main on its own thread
+// (it marks SDL's main ready itself). The app's link keeps this symbol.
+extern "C" __attribute__((visibility("default"))) int SDL_main(int argc, char* argv[]) {
+  return RunWindowedApp(argc, argv);
+}
+
 #else
 
 int main(int argc, char* argv[]) {

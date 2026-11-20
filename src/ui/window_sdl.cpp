@@ -34,6 +34,8 @@
 #include <SDL3/SDL_metal.h>
 
 #include <rex/ui/surface_mac.h>
+#elif REX_PLATFORM_ANDROID
+#include <rex/ui/surface_android.h>
 #else
 #include <X11/Xlib-xcb.h>
 #include <rex/ui/surface_gnulinux.h>
@@ -447,6 +449,14 @@ std::unique_ptr<Surface> WindowSDL::CreateSurfaceImpl(Surface::TypeFlags allowed
       SDL_Metal_DestroyView(metal_view);
     }
   }
+#elif REX_PLATFORM_ANDROID
+  if (allowed_types & Surface::kTypeFlag_AndroidNativeWindow) {
+    auto* native_window = static_cast<ANativeWindow*>(SDL_GetPointerProperty(
+        SDL_GetWindowProperties(sdl_window_), SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr));
+    if (native_window) {
+      return std::make_unique<AndroidNativeWindowSurface>(native_window);
+    }
+  }
 #else
   SDL_PropertiesID props = SDL_GetWindowProperties(sdl_window_);
   if (allowed_types & Surface::kTypeFlag_WaylandSurface) {
@@ -533,9 +543,18 @@ void WindowSDL::HandleWindowEvent(SDL_Event& event) {
       OnPaint(true);
       break;
     case SDL_EVENT_WINDOW_MINIMIZED:
+#if REX_PLATFORM_ANDROID
+      // The activity went to the background: SDL releases its ANativeWindow
+      // and creates a new one on return. Stop presenting to the old one.
+      OnSurfaceChanged(false);
+#endif
       OnMinimized(destruction_receiver);
       break;
     case SDL_EVENT_WINDOW_RESTORED:
+#if REX_PLATFORM_ANDROID
+      // SDL sends this once the new surface exists: attach to it.
+      OnSurfaceChanged(true);
+#endif
       OnRestored(destruction_receiver);
       break;
     case SDL_EVENT_WINDOW_CLOSE_REQUESTED:

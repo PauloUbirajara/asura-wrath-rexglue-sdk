@@ -53,8 +53,7 @@
 
 #include <linux/ashmem.h>
 
-// TODO(tomc): Android or maybe na. idk
-// #include "xenia/base/main_android.h"
+#include <rex/main_android.h>
 #endif
 
 namespace rex {
@@ -433,6 +432,9 @@ FileMappingHandle CreateFileMappingHandle(const std::filesystem::path& path, siz
                                           PageAccess access, bool commit) {
 #if REX_PLATFORM_ANDROID
   // TODO(Triang3l): Check if memfd can be used instead on API 30+.
+  // Nothing calls AndroidInitialize up front: look the function up on first use.
+  static const bool android_initialized = (AndroidInitialize(), true);
+  (void)android_initialized;
   if (android_ASharedMemory_create_) {
     int sharedmem_fd = android_ASharedMemory_create_(path.c_str(), length);
     return sharedmem_fd >= 0 ? static_cast<FileMappingHandle>(sharedmem_fd)
