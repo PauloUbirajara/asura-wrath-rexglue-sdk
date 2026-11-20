@@ -1019,6 +1019,10 @@ class PosixCondition<Thread> : public PosixConditionBase {
   static void* ThreadStartRoutine(void* parameter);
   inline bool signaled() const override { return signaled_; }
   inline void post_execution() override {
+    // Once: every wait on the finished thread ends here (under mutex_), and a
+    // second pthread_join/sem_destroy is undefined (bionic aborts on it).
+    if (joined_) return;
+    joined_ = true;
     if (thread_) {
       pthread_join(thread_, nullptr);
     }
@@ -1033,6 +1037,7 @@ class PosixCondition<Thread> : public PosixConditionBase {
   }
   pthread_t thread_;
   bool signaled_;
+  bool joined_ = false;  // post_execution done; protected by mutex_
   int exit_code_;
   State state_;             // Protected by state_mutex_
   uint32_t suspend_count_;  // Protected by state_mutex_
